@@ -23,6 +23,62 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5';
 const ENV_PATH = path.join(__dirname, '.env');
+const USAGE_PATH = path.join(__dirname, 'usage-stats.json');
+
+// ---------------------------------------------------------------------------
+// Usage / cost tracker. The Anthropic API has no endpoint to read back your
+// account's actual dollar balance, so this can't show a real "remaining
+// credit" figure — instead it counts the input/output tokens this app itself
+// has sent and received (each response carries a `usage` field) and prices
+// them at the model's published per-token rate, purely as a running total of
+// what this app has spent so far. Persisted to a small JSON file so it
+// survives a restart; note this resets if a host wipes its disk on redeploy.
+// ---------------------------------------------------------------------------
+const MODEL_PRICING_PER_MTOK = { // { input: $ per 1M input tokens, output: $ per 1M output tokens }
+  'claude-sonnet-5': { input: 2, output: 10 },
+  'claude-opus-5': { input: 5, output: 25 },
+  'claude-haiku-4-5': { input: 1, output: 5 },
+};
+
+let usageStats = { generations: 0, inputTokens: 0, outputTokens: 0 };
+try {
+  usageStats = Object.assign(usageStats, JSON.parse(fs.readFileSync(USAGE_PATH, 'utf8')));
+} catch (e) { /* no usage file yet — start from zero */ }
+
+function saveUsageStats() {
+  try {
+    fs.writeFileSync(USAGE_PATH, JSON.stringify(usageStats, null, 2));
+  } catch (e) {
+    console.error('[usage] could not persist usage-stats.json:', e.message);
+  }
+}
+
+function recordUsage(apiUsage) {
+  if (!apiUsage) return;
+  usageStats.generations += 1;
+  usageStats.inputTokens += apiUsage.input_tokens || 0;
+  usageStats.outputTokens += apiUsage.output_tokens || 0;
+  // Prompt-caching token fields, if this app ever enables caching — counted
+  // at input price so the running total doesn't silently under-report.
+  usageStats.inputTokens += apiUsage.cache_creation_input_tokens || 0;
+  usageStats.inputTokens += apiUsage.cache_read_input_tokens || 0;
+  saveUsageStats();
+}
+
+function getUsageSummary() {
+  const pricing = MODEL_PRICING_PER_MTOK[MODEL] || MODEL_PRICING_PER_MTOK['claude-sonnet-5'];
+  const estimatedCostUsd =
+    (usageStats.inputTokens / 1e6) * pricing.input +
+    (usageStats.outputTokens / 1e6) * pricing.output;
+  return {
+    generations: usageStats.generations,
+    inputTokens: usageStats.inputTokens,
+    outputTokens: usageStats.outputTokens,
+    estimatedCostUsd: Math.round(estimatedCostUsd * 10000) / 10000,
+    model: MODEL,
+    pricingKnown: Boolean(MODEL_PRICING_PER_MTOK[MODEL]),
+  };
+}
 
 // Trim defensively: a stray trailing newline/space in .env (common when a
 // key is pasted from a browser or a Windows editor) can otherwise produce
@@ -356,6 +412,23 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Running total of what this app has spent, tracked from the `usage` field
+// Anthropic returns on every successful /api/generate call (see the tracker
+// near the top of this file). Not a real account balance — Anthropic's API
+// has no endpoint for that — just this app's own running total.
+app.get('/api/usage', (req, res) => {
+  res.json(getUsageSummary());
+});
+
+// Lets the user zero the counter out themselves — e.g. right after topping
+// up credits at console.anthropic.com, so the big display on screen starts
+// counting fresh from that top-up instead of showing everything ever spent.
+app.post('/api/usage/reset', (req, res) => {
+  usageStats = { generations: 0, inputTokens: 0, outputTokens: 0 };
+  saveUsageStats();
+  res.json(getUsageSummary());
+});
+
 // ---------------------------------------------------------------------------
 // Lightweight per-IP rate limit on the expensive endpoint. This is a second
 // line of defense behind SITE_PASSWORD (or the only defense, if this app is
@@ -479,27 +552,74 @@ app.post('/api/generate', async (req, res) => {
     console.log(`[generate] concept="${concept.slice(0, 60)}..." scenes=${sceneCount} model=${MODEL}`);
     const started = Date.now();
 
+    // A fixed 8192-token ceiling was too tight once real users pasted long,
+    // detailed concepts (a full character list / treatment) alongside a high
+    // scene count: Claude would hit the limit mid-way through writing the
+    // tool call's JSON, so the response arrived with entire fields (locations,
+    // posters, social, audio, or the tail of storyboard/voiceover) silently
+    // missing. The frontend then crashed on the first `.map()` over an
+    // undefined field, which also stopped every tab after that from
+    // rendering — that's the "some pages don't work" bug. Scaling the budget
+    // with scene count, and hard-failing below if we still get cut off
+    // instead of shipping a half-built package, fixes both.
+    // Now also covers the longer 30/60-scene Duration options — the 30000
+    // ceiling comfortably fits a 60-scene package (~15k tokens in practice)
+    // with headroom; if a request still runs out, the stop_reason check
+    // below turns that into a clear error instead of a broken package.
+    const maxTokens = Math.min(30000, 3000 + sceneCount * 450);
+
+    // Longer packages take Claude noticeably longer to write. The SDK-level
+    // default (set on the `anthropic` client below) is a safety net for
+    // small requests; this per-request override gives big ones (30/60
+    // scenes) enough time instead of failing right as they're about to finish.
+    const requestTimeoutMs = Math.min(9 * 60 * 1000, 90 * 1000 + sceneCount * 8000);
+
     const response = await anthropic.messages.create({
       model: MODEL,
-      max_tokens: 8192,
+      max_tokens: maxTokens,
       system: SYSTEM_PROMPT,
       tools: [tool],
       tool_choice: { type: 'tool', name: 'submit_movie_package' },
       messages: [{ role: 'user', content: userPrompt }],
-    });
+    }, { timeout: requestTimeoutMs });
 
-    console.log(`[generate] Claude responded in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+    console.log(`[generate] Claude responded in ${((Date.now() - started) / 1000).toFixed(1)}s (stop_reason=${response.stop_reason}, max_tokens=${maxTokens})`);
+
+    // If Claude ran out of room before finishing the tool call, the JSON it
+    // produced is necessarily incomplete (missing trailing fields). Refuse
+    // it here with a clear, actionable message instead of forwarding a
+    // package that will crash the dashboard.
+    if (response.stop_reason === 'max_tokens') {
+      return res.status(502).json({
+        error: `Claude ໃຊ້ພື້ນທີ່ຄຳຕອບໝົດກ່ອນຈະສ້າງ Package ສຳເລັດ (output length limit reached) — ມັກເກີດເມື່ອ "ໄອເດຍ/ເນື້ອເລື່ອງ" ທີ່ພິມໃສ່ຍາວ ແລະ ລະອຽດຫຼາຍ, ຫຼືເລືອກຄວາມຍາວ (scenes) ສູງ. ລອງຫຍໍ້ຄວາມຍາວຂອງໄອເດຍທີ່ພິມໃສ່ໃຫ້ສັ້ນລົງ (ສະຫຼຸບໄອເດຍພຽງ 2-4 ປະໂຫຍກກໍ່ພໍ), ຫຼືເລືອກ Duration ໃຫ້ສັ້ນລົງ, ແລ້ວລອງໃໝ່.`,
+      });
+    }
 
     const toolUse = response.content.find((block) => block.type === 'tool_use' && block.name === 'submit_movie_package');
     if (!toolUse) {
       return res.status(502).json({ error: 'Claude did not return a structured package. Please try again.' });
     }
 
-    // Re-number scenes defensively in case the model's numbering drifted.
     const pkg = toolUse.input;
-    if (Array.isArray(pkg.storyboard)) {
-      pkg.storyboard.forEach((s, i) => { s.scene = i + 1; });
+
+    // Defensive validation: even without hitting max_tokens, make sure every
+    // field the dashboard's renderer unconditionally calls .map()/.forEach()
+    // on actually came back as an array, so a malformed response is caught
+    // here (as a clear error) instead of crashing the frontend.
+    const requiredArrayFields = ['voiceover', 'characters', 'storyboard', 'locations', 'posters', 'audio'];
+    const missingOrInvalid = requiredArrayFields.filter((f) => !Array.isArray(pkg[f]) || pkg[f].length === 0);
+    if (missingOrInvalid.length > 0 || !pkg.social || !Array.isArray(pkg.social.titles)) {
+      console.error('[generate] incomplete package from Claude, missing/invalid:', missingOrInvalid);
+      return res.status(502).json({
+        error: `Claude ສົ່ງ Package ກັບມາບໍ່ຄົບ (ຂາດສ່ວນ: ${missingOrInvalid.join(', ') || 'social'}). ລອງກົດ Generate ໃໝ່ອີກຄັ້ງ, ຫຼືຫຍໍ້ຄວາມຍາວ/ຄວາມສັບຊ້ອນຂອງໄອເດຍລົງ.`,
+      });
     }
+
+    // Re-number scenes defensively in case the model's numbering drifted.
+    pkg.storyboard.forEach((s, i) => { s.scene = i + 1; });
+
+    recordUsage(response.usage);
+    pkg._usage = getUsageSummary(); // lets the frontend update the big usage display without a second round trip
 
     res.json(pkg);
   } catch (err) {

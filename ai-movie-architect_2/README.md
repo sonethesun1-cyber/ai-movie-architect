@@ -40,10 +40,12 @@ The header shows a small badge — green ("Claude API: Ready") once a key is set
 ## Using it
 
 1. Type your story concept (Lao or English) in the sidebar, pick genre, aspect ratio, audience, duration, and target platforms.
-2. Click **"ປະມວນຜົນສ້າງ Package ໜັງ AI (Generate with Claude)."** The button shows a spinner while Claude writes the full package (usually 15–40 seconds depending on scene count).
-3. Browse all 8 tabs — story, voiceover, characters, storyboard, locations, posters, social, audio. Every prompt field has a one-click Copy button.
+2. Click **"ປະມວນຜົນສ້າງ Package ໜັງ AI (Generate with Claude)."** The button shows a spinner while Claude writes the full package: roughly 15–40 seconds for 1–3 minutes (6–18 scenes), and up to a few minutes for the longer 5/10-minute options (30/60 scenes) — the longer options also cost proportionally more per generation (see the usage banner).
+3. Browse all 9 tabs — story, voiceover, characters, storyboard, locations, posters, social, audio, and the edit sheet. Every prompt field has a one-click Copy button.
 4. Use **Export JSON** or **Export MD** in the header to download the whole package for pasting into Midjourney, Flux, Google Flow, Kling, Runway, Suno, Udio, or ElevenLabs.
 5. **"ໂຫຼດຕົວຢ່າງ (Sample)"** just refills the concept box with the demo example and re-renders the built-in sample package — it doesn't call the API, so it's free to click around with.
+
+**Scope note:** Duration tops out at 10 minutes (60 scenes) per generation — this is a short-form/social-video tool (TikTok, Shorts, Reels), not a feature-film generator. A single generation producing a full-length (60–120 minute) movie package isn't supported: it would mean hundreds of scenes, which is well beyond what one Claude API call can reliably produce, and would cost proportionally more per generation. If you have a longer story, describe it briefly as the concept and pick the longest duration that fits your platform — Claude will condense it into a short-form treatment rather than trying (and failing) to cover the whole thing scene-by-scene.
 
 ## How the generation works
 
@@ -91,6 +93,16 @@ Notes specific to the hosted version:
 - Set `ANTHROPIC_API_KEY` and `SITE_PASSWORD` through Render's **Environment Variables** dashboard (step 6), not the in-app "API Key" popup — most hosts reset the filesystem on every redeploy, so a key saved in-app there could be lost the next time you push an update. (The in-app popup still works meanwhile, it just isn't the durable place to keep it once it's hosted.)
 - To update the live app later, re-upload changed files to the same GitHub repo (same "Upload files" button) — Render redeploys automatically.
 - To change the password, just edit the `SITE_PASSWORD` environment variable in Render's dashboard and Render will restart the app with the new value.
+
+## Editing menu (Edit Sheet)
+
+A 9th tab, "ໃບສັ່ງຕັດຕໍ່ (Edit Sheet)", turns the generated storyboard into a scene-by-scene cutting order for you to follow in CapCut, Premiere, DaVinci Resolve, or any other video editor. For each scene it shows, side by side, the image prompt (for Midjourney/Flux), the motion prompt (for Kling/Runway), and the matching voiceover line (for ElevenLabs or similar) — in the exact order the final video should be assembled — followed by the music/SFX prompts to add last. An "Export ໃບຕັດຕໍ່ (.md)" button downloads the same thing as a checklist-style Markdown file you can keep open while you edit.
+
+This is a cutting *order sheet*, not automatic video editing — the app only ever produces text prompts (see "Notes & limits" below); you still generate each image/clip/voice line yourself in the tools above and assemble them in your editor by following this order.
+
+## Usage / cost tracker
+
+A banner between the header and the main dashboard shows a running total of what this app itself has spent: a big dollar figure, the number of generations, and total tokens used, updated automatically every time you click Generate. It's built from the token counts the Claude API returns with every response, priced at that model's published rate — **this is an estimate of what this app has used, not a live read of your real Anthropic account balance** (Anthropic's API has no endpoint that reports your actual remaining credit). Click **Reset** on the banner any time — e.g. right after you top up credits at console.anthropic.com — to zero the counter and start tracking fresh. The total is saved to a small `usage-stats.json` file next to `server.js` so it survives a restart (note: most free hosts, including Render's free tier, wipe the filesystem on every redeploy, so the counter resets then too).
 
 ## Notes & limits
 
