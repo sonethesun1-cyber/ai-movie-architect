@@ -1,0 +1,1090 @@
+<!DOCTYPE html>
+<html lang="lo" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Movie Architect - ໂຄງການສ້າງໜັງ AI</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        cinema: {
+                            900: '#0B0D14',
+                            800: '#131722',
+                            700: '#1E2333',
+                            600: '#2A3047',
+                            accent: '#6366F1',
+                            gold: '#F59E0B',
+                            neon: '#10B981',
+                            rose: '#F43F5E'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'Noto Sans Lao', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Google Fonts for Lao & Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+Lao:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <style>
+        body {
+            font-family: 'Inter', 'Noto Sans Lao', sans-serif;
+            background-color: #0B0D14;
+            color: #E2E8F0;
+        }
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #131722;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #2A3047;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6366F1;
+        }
+        .glass-panel {
+            background: rgba(19, 23, 34, 0.75);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .glass-input {
+            background: rgba(30, 35, 51, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #F8FAFC;
+        }
+        .glass-input:focus {
+            border-color: #6366F1;
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25);
+        }
+        .active-tab {
+            background: #6366F1 !important;
+            color: white !important;
+            border-color: #818CF8 !important;
+        }
+        .spin {
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        #btnGenerate:disabled {
+            opacity: 0.65;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+        .skeleton {
+            background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 37%, rgba(255,255,255,0.03) 63%);
+            background-size: 400% 100%;
+            animation: skeleton-loading 1.4s ease infinite;
+        }
+        @keyframes skeleton-loading {
+            0% { background-position: 100% 50%; }
+            100% { background-position: 0 50%; }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between selection:bg-indigo-500 selection:text-white">
+
+    <!-- Navigation Bar -->
+    <header class="sticky top-0 z-50 glass-panel border-b border-slate-800/80 px-4 lg:px-8 py-3.5">
+        <div class="max-w-7xl mx-auto flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-amber-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                    <i class="ph-bold ph-film-slate text-2xl text-white"></i>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold bg-gradient-to-r from-white via-slate-200 to-indigo-300 bg-clip-text text-transparent">
+                        AI Movie Architect
+                    </h1>
+                    <p class="text-xs text-slate-400">ລະບົບວາງແຜນ ແລະ ສ້າງໜັງ AI ແບບຄົບວົງຈອນ</p>
+                </div>
+            </div>
+
+            <div class="flex items-center space-x-3">
+                <button onclick="openApiKeyModal()" id="apiStatusBadge" class="text-xs px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5 hidden hover:opacity-80 transition cursor-pointer" title="Click to set or change your Anthropic API key">
+                    <i class="ph-bold ph-circle text-[8px]"></i>
+                    <span id="apiStatusText"></span>
+                </button>
+                <button onclick="loadSampleProject()" class="text-xs px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition flex items-center gap-1.5">
+                    <i class="ph-bold ph-sparkle text-amber-400"></i>
+                    <span>ໂຫຼດຕົວຢ່າງ (Sample)</span>
+                </button>
+                <button onclick="exportJSON()" class="text-xs px-3 py-2 rounded-lg bg-indigo-900/40 hover:bg-indigo-800/60 text-indigo-300 border border-indigo-700/50 transition flex items-center gap-1.5">
+                    <i class="ph-bold ph-download-simple"></i>
+                    <span>Export JSON</span>
+                </button>
+                <button onclick="exportMarkdown()" class="text-xs px-3 py-2 rounded-lg bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300 border border-emerald-700/50 transition flex items-center gap-1.5">
+                    <i class="ph-bold ph-file-text"></i>
+                    <span>Export MD</span>
+                </button>
+                <button onclick="logout()" id="logoutBtn" class="hidden text-xs px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition flex items-center gap-1.5" title="Log out">
+                    <i class="ph-bold ph-sign-out"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow max-w-7xl w-full mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Left Sidebar: Film Setup Input Panel -->
+        <section class="lg:col-span-4 space-y-5">
+            <div class="glass-panel p-5 rounded-2xl border border-slate-800 shadow-xl space-y-4 sticky top-20">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <h2 class="font-semibold text-slate-100 flex items-center gap-2">
+                        <i class="ph-bold ph-sliders-horizontal text-indigo-400"></i>
+                        <span>ຂໍ້ມູນຕົ້ນສະບັບ (Film Generator)</span>
+                    </h2>
+                    <span class="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Step 1</span>
+                </div>
+
+                <!-- Story Input Form -->
+                <div class="space-y-3.5 text-sm">
+                    <div>
+                        <label class="block text-xs font-medium text-slate-300 mb-1">ເນື້ອເອກະສານ / ໄອເດຍໜັງ (Story Concept)</label>
+                        <textarea id="inputConcept" rows="4" class="w-full glass-input rounded-xl p-3 text-xs leading-relaxed resize-none" placeholder="ຕົວຢ່າງ: ເດັກນ້ອຍລາວຜູ້ໜຶ່ງຄົ້ນພົບຫຸ່ນພົນອໍໂຕ້ໃນປ່າບູຮານ ເຊິ່ງສາມາດປ່ຽນພະລັງງານແສງອາທິດມາເປັນເຄື່ອງປູກຜັກອັດໂຕໂນມັດ..."></textarea>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-medium text-slate-300 mb-1">ສັງກັດ / ແນວໜັງ (Genre)</label>
+                            <select id="inputGenre" class="w-full glass-input rounded-xl p-2.5 text-xs">
+                                <option value="3D Pixar Style Animation">3D Pixar Animation</option>
+                                <option value="Photorealistic Cinematic Sci-Fi">Photorealistic Sci-Fi</option>
+                                <option value="High Anime / Ghibli Style">Anime / Studio Ghibli</option>
+                                <option value="Fantasy Epic Adventure">Fantasy Epic</option>
+                                <option value="Horror & Mystery Thriller">Horror & Mystery</option>
+                                <option value="Documentary & Cultural Heritage">Documentary</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-300 mb-1">ຮູບແບບວິດີໂອ (Aspect Ratio)</label>
+                            <select id="inputFormat" class="w-full glass-input rounded-xl p-2.5 text-xs">
+                                <option value="9:16 Vertical (TikTok / Shorts / Reels)">9:16 Vertical (TikTok/Shorts)</option>
+                                <option value="16:9 Landscape (YouTube / Cinema)">16:9 Cinema (YouTube)</option>
+                                <option value="1:1 Square (Social Media)">1:1 Square</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-medium text-slate-300 mb-1">ກຸ່ມເປົ້າໝາຍ (Audience)</label>
+                            <input type="text" id="inputAudience" class="w-full glass-input rounded-xl p-2.5 text-xs" value="ເດັກນ້ອຍ ແລະ ຄອບຄົວ (All Ages)">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-300 mb-1">ຄວາມຍາວ (Duration)</label>
+                            <select id="inputDuration" class="w-full glass-input rounded-xl p-2.5 text-xs">
+                                <option value="1 Minute (6 Scenes)">1 ນາທີ (6 ສາກ)</option>
+                                <option value="2 Minutes (12 Scenes)">2 ນາທີ (12 ສາກ)</option>
+                                <option value="3 Minutes (18 Scenes)">3 ນາທີ (18 ສາກ)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-medium text-slate-300 mb-1">ອອນໄລນ໌ / ແພລັດຟອມ (Target Platform)</label>
+                        <div class="grid grid-cols-3 gap-2">
+                            <label class="flex items-center gap-1.5 p-2 rounded-lg bg-slate-800/60 border border-slate-700/60 cursor-pointer text-xs">
+                                <input type="checkbox" checked value="TikTok" class="platform-checkbox rounded text-indigo-500 focus:ring-0">
+                                <span>TikTok</span>
+                            </label>
+                            <label class="flex items-center gap-1.5 p-2 rounded-lg bg-slate-800/60 border border-slate-700/60 cursor-pointer text-xs">
+                                <input type="checkbox" checked value="YouTube" class="platform-checkbox rounded text-indigo-500 focus:ring-0">
+                                <span>YouTube</span>
+                            </label>
+                            <label class="flex items-center gap-1.5 p-2 rounded-lg bg-slate-800/60 border border-slate-700/60 cursor-pointer text-xs">
+                                <input type="checkbox" value="Facebook" class="platform-checkbox rounded text-indigo-500 focus:ring-0">
+                                <span>Reels</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <button onclick="generateMoviePackage()" id="btnGenerate" class="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold text-xs shadow-lg shadow-indigo-600/30 transition transform active:scale-95 flex items-center justify-center gap-2">
+                        <i class="ph-bold ph-magic-wand text-lg" id="btnGenerateIcon"></i>
+                        <span id="btnGenerateLabel">ປະມວນຜົນສ້າງ Package ໜັງ AI (Generate with Claude)</span>
+                    </button>
+                    <p id="generateError" class="text-xs text-rose-400 hidden"></p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Section: Production Package Results Dashboard -->
+        <section class="lg:col-span-8 space-y-4">
+
+            <!-- Category Navigation Tabs -->
+            <div class="glass-panel p-1.5 rounded-2xl border border-slate-800 flex items-center space-x-1 overflow-x-auto text-xs no-scrollbar">
+                <button onclick="switchTab('tab-story')" id="nav-tab-story" class="active-tab flex-shrink-0 px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 font-medium border border-transparent">
+                    <i class="ph-bold ph-book-open"></i>
+                    <span>1. ເນື້ອເລື່ອງ (Script)</span>
+                </button>
+                <button onclick="switchTab('tab-vo')" id="nav-tab-vo" class="flex-shrink-0 px-3.5 py-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition flex items-center gap-1.5 font-medium border border-transparent">
+                    <i class="ph-bold ph-microphone"></i>
+                    <span>2. ບົດພາກ (Voiceover)</span>
+                </button>
+                <button onclick="switchTab('tab-characters')" id="nav-tab-characters" class="flex-shrink-0 px-3.5 py-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition flex items-center gap-1.5 font-medium border border-transparent">
+                    <i class="ph-bold ph-users-three"></i>
+                    <span>3. ຕົວລະຄອນ</span>
+                </button>
+                <button onclick="switchTab('tab-storyboard')" id="nav-tab-storyboard" class="flex-shrink-0 px-3.5 py-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition flex items-center gap-1.5 font-medium border border-transparent">
+                    <i class="ph-bold ph-film-strip"></i>
+                    <span>4. Storyboard Shots</span>
+                </button>
+                <button onclick="switchTab('tab-locations')" id="nav-tab-locations" class="flex-shrink-0 px-3.5 py-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition flex items-center gap-1.5 font-medium border border-transparent">
+                    <i class="ph-bold ph-mountains"></i>
+                    <span>5. ສະຖານທີ່ (Sets)</span>
+                </button>
+                <button onclick="switchTab('tab-posters')" id="nav-tab-posters" class="flex-shrink-0 px-3.5 py-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition flex items-center gap-1.5 font-medium border border-transparent">
+                    <i class="ph-bold ph-image"></i>
+                    <span>6. ໜ້າປົກໜັງ</span>
+                </button>
+                <button onclick="switchTab('tab-social')" id="nav-tab-social" class="flex-shrink-0 px-3.5 py-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition flex items-center gap-1.5 font-medium border border-transparent">
+                    <i class="ph-bold ph-share-network"></i>
+                    <span>7. ແຄັບຊັນ & SEO</span>
+                </button>
+                <button onclick="switchTab('tab-audio')" id="nav-tab-audio" class="flex-shrink-0 px-3.5 py-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition flex items-center gap-1.5 font-medium border border-transparent">
+                    <i class="ph-bold ph-music-notes"></i>
+                    <span>8. ສຽງ BGM & Audio</span>
+                </button>
+            </div>
+
+            <!-- Tab 1: Story Outline -->
+            <div id="tab-story" class="tab-content space-y-4">
+                <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <h3 class="font-bold text-slate-100 flex items-center gap-2">
+                            <i class="ph-bold ph-subtitles text-indigo-400"></i>
+                            <span>ໂຄງສ້າງເນື້ອເລື່ອງ (Story Outline & Script Structure)</span>
+                        </h3>
+                        <button onclick="copyToClipboard('storyContent')" class="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
+                            <i class="ph-bold ph-copy"></i> Copy
+                        </button>
+                    </div>
+
+                    <div id="storyContent" class="space-y-4 text-sm text-slate-300">
+                        <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-800">
+                            <span class="text-xs uppercase tracking-wider text-indigo-400 font-semibold block mb-1">Logline (ສະຫຼຸບເນື້ອເລື່ອງ)</span>
+                            <p id="outLogline" class="text-slate-200 font-medium leading-relaxed">ກົດ "ປະມວນຜົນ" ເພື່ອສ້າງເນື້ອເລື່ອງ ຫຼື ໂຫຼດຕົວຢ່າງ project.</p>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div class="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800">
+                                <span class="text-xs uppercase tracking-wider text-amber-400 font-semibold block mb-1">Theme & Emotion (ອາລົມຂອງເລື່ອງ)</span>
+                                <p id="outTheme" class="text-xs text-slate-300">-</p>
+                            </div>
+                            <div class="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800">
+                                <span class="text-xs uppercase tracking-wider text-emerald-400 font-semibold block mb-1">Visual Art Style</span>
+                                <p id="outArtStyle" class="text-xs text-slate-300">-</p>
+                            </div>
+                        </div>
+
+                        <div class="space-y-2">
+                            <h4 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">3-Act Narrative Arc (ລຳດັບການດຳເນີນເລື່ອງ)</h4>
+                            <div class="space-y-2.5">
+                                <div class="p-3 bg-slate-900/40 rounded-xl border border-slate-800/80">
+                                    <span class="text-xs font-bold text-indigo-400">Act 1: ເປີດໂຕເລື່ອງ (Beginning)</span>
+                                    <p id="outAct1" class="text-xs mt-1 text-slate-300 leading-relaxed">-</p>
+                                </div>
+                                <div class="p-3 bg-slate-900/40 rounded-xl border border-slate-800/80">
+                                    <span class="text-xs font-bold text-amber-400">Act 2: ຈຸດພິກຜັນ & ອຸປະສັກ (Climax)</span>
+                                    <p id="outAct2" class="text-xs mt-1 text-slate-300 leading-relaxed">-</p>
+                                </div>
+                                <div class="p-3 bg-slate-900/40 rounded-xl border border-slate-800/80">
+                                    <span class="text-xs font-bold text-emerald-400">Act 3: ບົດສະຫຼຸບ (Resolution)</span>
+                                    <p id="outAct3" class="text-xs mt-1 text-slate-300 leading-relaxed">-</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 2: Lao Voiceover Script -->
+            <div id="tab-vo" class="tab-content hidden space-y-4">
+                <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <h3 class="font-bold text-slate-100 flex items-center gap-2">
+                            <i class="ph-bold ph-microphone text-emerald-400"></i>
+                            <span>ບົດພາກພາສາລາວ (Lao Voiceover Script with Timecodes)</span>
+                        </h3>
+                        <button onclick="copyToClipboard('voContent')" class="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
+                            <i class="ph-bold ph-copy"></i> Copy Voiceover Script
+                        </button>
+                    </div>
+
+                    <div id="voContent" class="space-y-3 font-sans">
+                        <!-- VO Timeline Items dynamically populated -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 3: Characters Profiles -->
+            <div id="tab-characters" class="tab-content hidden space-y-4">
+                <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <h3 class="font-bold text-slate-100 flex items-center gap-2">
+                            <i class="ph-bold ph-users-three text-purple-400"></i>
+                            <span>ຂໍ້ມູນຕົວລະຄອນ & Visual Prompt Anchors</span>
+                        </h3>
+                        <span class="text-xs text-slate-400">ໃຊ້ລັອກໜ້າຕາຕົວລະຄອນໃຫ້ຄືເກົ່າ (Consistency)</span>
+                    </div>
+
+                    <div id="characterList" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Character Cards -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 4: Storyboard Shots Breakdown -->
+            <div id="tab-storyboard" class="tab-content hidden space-y-4">
+                <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div>
+                            <h3 class="font-bold text-slate-100 flex items-center gap-2">
+                                <i class="ph-bold ph-film-strip text-amber-400"></i>
+                                <span>Shot-by-Shot Storyboard Matrix</span>
+                            </h3>
+                            <p class="text-xs text-slate-400 mt-0.5">ແຍກເປັນຊັອດ 10 ວິນາທີ ພ້ອມ Image Prompts ແລະ Camera Motion Prompts</p>
+                        </div>
+                        <button onclick="addNewScene()" class="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium flex items-center gap-1">
+                            <i class="ph-bold ph-plus"></i> ເພີ່ມ Scene
+                        </button>
+                    </div>
+
+                    <div id="storyboardContainer" class="space-y-4">
+                        <!-- Storyboard Scene Cards -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 5: Locations & Sets -->
+            <div id="tab-locations" class="tab-content hidden space-y-4">
+                <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <h3 class="font-bold text-slate-100 flex items-center gap-2">
+                            <i class="ph-bold ph-mountains text-cyan-400"></i>
+                            <span>ສະຖານທີ່ & ສາກຫຼັງ (Set Environments)</span>
+                        </h3>
+                        <span class="text-xs text-slate-400">Background Prompts (No Characters)</span>
+                    </div>
+
+                    <div id="locationList" class="space-y-3">
+                        <!-- Locations dynamically rendered -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 6: Poster Specs -->
+            <div id="tab-posters" class="tab-content hidden space-y-4">
+                <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <h3 class="font-bold text-slate-100 flex items-center gap-2">
+                            <i class="ph-bold ph-image text-rose-400"></i>
+                            <span>ຂໍ້ກຳນົດສ້າງໜ້າປົກໜັງ (Movie Poster Specs)</span>
+                        </h3>
+                    </div>
+
+                    <div id="posterContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Poster specs dynamically rendered -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 7: Social Media & Upload Package -->
+            <div id="tab-social" class="tab-content hidden space-y-4">
+                <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <h3 class="font-bold text-slate-100 flex items-center gap-2">
+                            <i class="ph-bold ph-share-network text-indigo-400"></i>
+                            <span>ແຄັບຊັນ & ຊຸດສື່ເຜີຍແຜ່ (Social Media Package)</span>
+                        </h3>
+                    </div>
+
+                    <div class="space-y-4 text-xs">
+                        <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
+                            <label class="font-bold text-slate-200 flex items-center justify-between">
+                                <span>ຕົວເລືອກຊື່ຄລິບ / ຫົວຂໍ້ (Catchy Title Options):</span>
+                                <button onclick="copyToClipboard('socialTitles')" class="text-indigo-400 hover:underline">Copy Titles</button>
+                            </label>
+                            <div id="socialTitles" class="space-y-1 text-slate-300 font-mono">
+                                <!-- Titles -->
+                            </div>
+                        </div>
+
+                        <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
+                            <label class="font-bold text-slate-200 flex items-center justify-between">
+                                <span>ແຄັບຊັນ & ເນື້ອຫາອັບໂຫຼດ (TikTok / YouTube Description in Lao):</span>
+                                <button onclick="copyToClipboard('socialDescription')" class="text-indigo-400 hover:underline">Copy Caption</button>
+                            </label>
+                            <p id="socialDescription" class="text-slate-300 leading-relaxed whitespace-pre-line font-sans"></p>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div class="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800 space-y-2">
+                                <label class="font-bold text-slate-200 block">Hashtags (ແຮຊແທັກ):</label>
+                                <p id="socialHashtags" class="text-indigo-300 font-mono leading-relaxed"></p>
+                            </div>
+                            <div class="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800 space-y-2">
+                                <label class="font-bold text-slate-200 block">SEO Target Keywords:</label>
+                                <p id="socialKeywords" class="text-emerald-300 font-mono leading-relaxed"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 8: Audio & Music Prompts -->
+            <div id="tab-audio" class="tab-content hidden space-y-4">
+                <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <h3 class="font-bold text-slate-100 flex items-center gap-2">
+                            <i class="ph-bold ph-music-notes text-amber-400"></i>
+                            <span>ດົນຕີປະກອບ & ສຽງ Effect Prompts (Suno / Udio / SFX)</span>
+                        </h3>
+                    </div>
+
+                    <div id="audioContainer" class="space-y-4 text-xs">
+                        <!-- Audio Prompts dynamically rendered -->
+                    </div>
+                </div>
+            </div>
+
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="glass-panel border-t border-slate-800 py-3 px-6 mt-8">
+        <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between text-xs text-slate-400 gap-2">
+            <div class="flex items-center gap-2">
+                <i class="ph-bold ph-movie text-indigo-400"></i>
+                <span>AI Movie Architect - ລະບົບຊ່ວຍສ້າງໜັງ AI ພາສາລາວ</span>
+            </div>
+            <p>ພັດທະນາເພື່ອເຮັດວຽກຮ່ວມກັບ Claude, Midjourney, Kling, Runway & Suno AI</p>
+        </div>
+    </footer>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed bottom-5 right-5 bg-indigo-600 text-white text-xs px-4 py-2.5 rounded-xl shadow-2xl transform translate-y-20 opacity-0 transition-all duration-300 flex items-center gap-2 z-50 pointer-events-none">
+        <i class="ph-bold ph-check-circle text-lg" id="toastIcon"></i>
+        <span id="toastMsg">ສຳເລັດ!</span>
+    </div>
+
+    <!-- API Key Setup Modal (no text editor / terminal required) -->
+    <div id="apiKeyModal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4" style="background: rgba(2,4,10,0.75); backdrop-filter: blur(4px);">
+        <div class="glass-panel w-full max-w-md rounded-2xl border border-slate-700 p-6 space-y-4 shadow-2xl">
+            <div class="flex items-center gap-2.5">
+                <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center flex-shrink-0">
+                    <i class="ph-bold ph-key text-lg text-white"></i>
+                </div>
+                <div>
+                    <h3 class="font-bold text-slate-100 text-sm">ຕັ້ງຄ່າ Anthropic API Key</h3>
+                    <p class="text-xs text-slate-400">ບໍ່ຕ້ອງແກ້ໄຟລ໌ .env ດ້ວຍມື — ວາງ key ຢູ່ບ່ອນນີ້ໄດ້ເລີຍ</p>
+                </div>
+            </div>
+
+            <div class="space-y-2">
+                <label class="block text-xs font-medium text-slate-300">Anthropic API Key</label>
+                <input type="password" id="apiKeyInput" placeholder="sk-ant-..." class="w-full glass-input rounded-xl p-2.5 text-xs font-mono" autocomplete="off">
+                <p class="text-[11px] text-slate-400 leading-relaxed">
+                    ຍັງບໍ່ມີ key? ໄປສ້າງໄດ້ທີ່
+                    <a href="https://console.anthropic.com" target="_blank" rel="noopener" class="text-indigo-400 hover:underline">console.anthropic.com</a>
+                    → Settings → API Keys. Key ຈະຖືກບັນທຶກໄວ້ໃນເຄື່ອງຂອງທ່ານເທົ່ານັ້ນ (ໄຟລ໌ .env ຢູ່ໃນໂຟນເດີແອັບ), ບໍ່ໄດ້ສົ່ງໄປໃສ່ບ່ອນອື່ນ.
+                </p>
+                <p id="apiKeyModalError" class="text-xs text-rose-400 hidden"></p>
+            </div>
+
+            <div class="flex items-center justify-end gap-2 pt-1">
+                <button onclick="closeApiKeyModal()" class="text-xs px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
+                    ຂ້າມໄປກ່ອນ (Skip)
+                </button>
+                <button onclick="saveApiKey()" id="apiKeyModalSaveBtn" class="text-xs px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold transition flex items-center gap-1.5">
+                    <i class="ph-bold ph-floppy-disk"></i>
+                    <span>ບັນທຶກ (Save)</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Project State Data Object (sample data shown until the user generates a real package)
+        let currentProject = {
+            title: "ຕຳນານຫຸ່ນພົນອໍໂຕ້ໃນປ່າບູຮານ (The Ancient Solar Automation)",
+            genre: "3D Pixar Animation",
+            format: "9:16 Vertical (TikTok / Shorts)",
+            audience: "ເດັກນ້ອຍ ແລະ ຄອບຄົວ",
+            duration: "1 Minute (6 Scenes)",
+            logline: "ເດັກນ້ອຍລາວຜູ້ໜຶ່ງຊື່ 'ຄຳຜານ' ໄດ້ຄົ້ນພົບຫຸ່ນພົນອໍໂຕ້ບູຮານທີ່ໃຊ້ພະລັງງານແສງອາທິດໃນປ່າເລິກ ເຊິ່ງເປັນກຸນແຈສຳຄັນໃນການຊ່ວຍຟື້ນຟູທຳມະຊາດ ແລະ ໝູ່ບ້ານຂອງລາວ.",
+            theme: "ມິດຕະພາບ, ການຮຽນຮູ້, ແລະ ເທັກໂນໂລຢີຮ່ວມກັບທຳມະຊາດ",
+            artStyle: "3D Pixar render, vibrant tropical lighting, cinematic volume fog, ultra-detailed characters",
+            act1: "ຄຳຜານ ເດັກຊາຍລາວອາຍຸ 10 ປີ ກຳລັງຍ່າງຊອກຫາຜັກປ່າໃນເລິກ ແລ້ວໄປສະດຸດລົ້ມໃສ່ຫີນບູຮານທີ່ມີແສງສີຟ້າໄຫຼອອກມາ.",
+            act2: "ຫີນບູຮານກາຍເປັນຫຸ່ນພົນອໍໂຕ້ຂະໜາດນ້ອຍ 'ອໍໂຕ້'. ພວກເຂົາຮ່ວມມືກັນໃຊ້ແສງອາທິດເພື່ອເນົາມີດປູກພືດພັນຢ່າງອັດສະຈັນ.",
+            act3: "ໝູ່ບ້ານກັບມາອຸດົມສົມບູນ, ຄຳຜານ ແລະ ອໍໂຕ້ ກາຍເປັນຄູ່ຫູຜູ້ປົກປ້ອງທຳມະຊາດປະຈຳແຂວງ.",
+            voiceover: [
+                { time: "00:00 - 00:10", emotion: "ຕື່ນເຕັ້ນ & ລຶກລັບ", text: "ຢູ່ໃນປ່າເລິກຂອງແຂວງຫຼວງພະບາງ... ມີຄວາມລົບຊ່ອນຢູ່ທີ່ບໍ່ມີໃຜຄາດຄິດ." },
+                { time: "00:10 - 00:20", emotion: "ປະຫຼາດໃຈ", text: "ຄຳຜານ ເດັກຊາຍຜູ້ມີຄວາມຝັນ ໄດ້ຄົ້ນພົບ 'ອໍໂຕ້' ຫຸ່ນພົນອໍໂຕ້ບູຮານທີ່ຫຼັບໄຫຼມາຮ້ອຍປີ." },
+                { time: "00:20 - 00:30", emotion: "ອົບອຸ່ນ & ມີຄວາມຫວັງ", text: "ດ້ວຍພະລັງງານແສງອາທິດ, ອໍໂຕ້ໄດ້ປ່ຽນດິນແຫ້ງແລ້ງໃຫ້ກາຍເປັນສວນຜັກອັດສະຈັນ!" },
+                { time: "00:30 - 00:40", emotion: "ຕື່ນເຕັ້ນ / Action", text: "ແຕ່ແລ້ວ... ພະຍຸຝົນບູຮານກໍໄດ້ພັດເຂົ້າມາທ້າທາຍມິດຕະພາບຂອງພວກເຂົາ." },
+                { time: "00:40 - 00:50", emotion: "ຊາບຊຶ້ງ", text: "ດ້ວຍຄວາມກ້າຫານ, ຄຳຜານ ແລະ ອໍໂຕ້ ໄດ້ເຊື່ອມຕໍ່ພະລັງງານຮ່ວມກັນປົກປ້ອງໝູ່ບ້ານ." },
+                { time: "00:50 - 01:00", emotion: "ມີຄວາມສຸກ & ແຮງບັນດານໃຈ", text: "ມິດຕະພາບທີ່ບໍ່ມີວັນສິ້ນສຸດ... ຕິດຕາມຕອນຕໍ່ໄປໃນອະນາຄົດ!" }
+            ],
+            characters: [
+                {
+                    name: "ຄຳຜານ (Khamphan)",
+                    age: "10 ປີ",
+                    role: "ຕົວເອກ (Main Character)",
+                    visual: "ເດັກຊາຍລາວ ຕາໂຕສົດໃສ, ຜົມດຳສັ້ນ, ໃສ່ເສື້ອແຂນສັ້ນສີຟ້າ, ໂສ້ງຂາສັ້ນ, ມີກະເປົ໋າຍືມສະພາຍຂ້າງ",
+                    anchor: "10-year-old Lao boy, cheerful big dark eyes, short messy black hair, wearing a casual blue indigo t-shirt, brown woven traditional Lao cross-body bag, 3D Pixar render style, highly detailed character design --ar 9:16"
+                },
+                {
+                    name: "ອໍໂຕ້ (Otto the Ancient Bot)",
+                    age: "500 ປີ",
+                    role: "ຄູ່ຫູຫຸ່ນພົນ (Robot Companion)",
+                    visual: "ຫຸ່ນພົນອໍໂຕ້ນ້ອຍສີທອງປະສົມສີຂຽວ Moss, ມີດວງຕາສີຟ້າ Glowing LED, ເຮັດຈາກໂລຫະບູຮານມີລວດລາຍລາວ",
+                    anchor: "Cute small ancient solar robot, brass and mossy bronze metallic texture, glowing neon blue round eyes, intricate traditional Lao patterns engraved on chest plate, friendly appearance, 3D Pixar render style --ar 9:16"
+                }
+            ],
+            storyboard: [
+                {
+                    scene: 1,
+                    time: "00:00 - 00:10",
+                    desc: "ຄຳຜານ ຍ່າງຜ່ານປ່າໄມ້ບູຮານທີ່ມີແສງແດດລອດຜ່ານໃບໄມ້",
+                    imagePrompt: "Cinematic shot of Khamphan walking through a magical ancient tropical forest in Luang Prabang, golden sunlight filtering through giant jungle ferns, 3D Pixar animation style, vivid color palette --ar 9:16",
+                    motionPrompt: "Camera slow pan right following character walking, subtle dust motes floating in sunbeams, foliage gently swaying."
+                },
+                {
+                    scene: 2,
+                    time: "00:10 - 00:20",
+                    desc: "ຄຳຜານ ພົບຫຸ່ນພົນອໍໂຕ້ທີ່ຕິດຢູ່ໃນຮາກໄມ້ບູຮານ",
+                    imagePrompt: "Close up of Khamphan discovering a small mossy bronze ancient robot Otto entangled in giant tree roots, blue glowing eyes lighting up, amazed facial expression, 3D Pixar render --ar 9:16",
+                    motionPrompt: "Slow push-in zoom towards the glowing robot eyes, camera rotation 15 degrees."
+                },
+                {
+                    scene: 3,
+                    time: "00:20 - 00:30",
+                    desc: "ອໍໂຕ້ປ່ອຍແສງສີຟ້າຮັກສາຕົ້ນໄມ້ ແລະ ພືດພັນ",
+                    imagePrompt: "Otto the small bronze robot extending its mechanical arms, emitting magical glowing green energy onto lush Lao vegetable plants, Khamphan smiling in background, magical lighting --ar 9:16",
+                    motionPrompt: "Low angle tilt up shot, particles radiating outward from robot arms, cinematic motion blur."
+                },
+                {
+                    scene: 4,
+                    time: "00:30 - 00:40",
+                    desc: "ເມກດຳ ແລະ ພະຍຸເລີ່ມຕົ້ນພັດເຂົ້າຫາໝູ່ບ້ານ",
+                    imagePrompt: "Wide shot of dark storm clouds rolling over a peaceful Lao traditional wooden village in the valley, dramatic atmospheric lighting, wind rustling palm trees --ar 9:16",
+                    motionPrompt: "Fast dynamic tracking shot moving upwards into the clouds, thunder flash effect."
+                },
+                {
+                    scene: 5,
+                    time: "00:40 - 00:50",
+                    desc: "ຄຳຜານ ແລະ ອໍໂຕ້ ຮ່ວມມືກັນກາງພະຍຸ",
+                    imagePrompt: "Khamphan and Otto standing back to back in the rain, energetic blue shield surrounding them, heroic pose, dramatic rim light, 3D Pixar cinematic style --ar 9:16",
+                    motionPrompt: "Orbit camera 360 rotation around the characters, water drop physics particle simulation."
+                },
+                {
+                    scene: 6,
+                    time: "00:50 - 01:00",
+                    desc: "ໝູ່ບ້ານກັບມາສົດໃສ, ທຸກຄົນຍິ້ມຢ່າງມີຄວາມສຸກ",
+                    imagePrompt: "Wide happy ending scene, sunny bright Lao village with lush blooming gardens, Khamphan and Otto waving joyfully at camera, vibrant rainbow in background, 3D Pixar render --ar 9:16",
+                    motionPrompt: "Crane zoom out shot revealing the beautiful green landscape and village horizon."
+                }
+            ],
+            locations: [
+                {
+                    name: "ປ່າບູຮານຫຼວງພະບາງ (Ancient Forest)",
+                    desc: "ປ່າດົງດິບທີ່ມີຕົ້ນໄມ້ໃຫຍ່ ແລະ ແສງແດດລອດຜ່ານ",
+                    prompt: "Environment background concept art of ancient dense jungle in Laos, giant tropical banyan trees, glowing moss, sunbeams breaking through canopy, cinematic 3D render, no humans --ar 9:16"
+                },
+                {
+                    name: "ໝູ່ບ້ານລາວບູຮານ (Lao Eco-Village)",
+                    desc: "ໝູ່ບ້ານເຮືອນໄມ້ລາວປະສົມປະສານສວນພືດອັດໂຕໂນມັດ",
+                    prompt: "Environment background art of a peaceful traditional Lao village with wooden stilt houses surrounded by futuristic green solar farming plots, warm golden hour lighting, 3D Pixar style --ar 9:16"
+                }
+            ],
+            posters: [
+                {
+                    title: "Poster Concept 1: Vertical TikTok/Shorts (9:16)",
+                    prompt: "Official movie poster art, a young Lao boy Khamphan standing next to a small glowing golden ancient robot Otto, magical jungle background, bold volumetric title space at top, 3D Pixar animation style, epic poster lighting --ar 9:16",
+                    textOverlay: "Top: 'ຕຳນານອໍໂຕ້ບູຮານ' | Bottom: 'ມິດຕະພາບຂ້າມກາລະເວລານີ້!' "
+                },
+                {
+                    title: "Poster Concept 2: Landscape YouTube Cinema (16:9)",
+                    prompt: "Cinematic wide movie poster banner, Khamphan and ancient robot Otto overlooking a vast glowing green Lao valley with rainbows and solar rays, 3D animation masterpiece, dynamic typography composition --ar 16:9",
+                    textOverlay: "Center Main: 'THE ANCIENT SOLAR AUTOMATION' | Subtitle in Lao: 'ໜັງສັ້ນ AI ແຮງບັນດານໃຈ'"
+                }
+            ],
+            social: {
+                titles: [
+                    "1. ເມື່ອເດັກນ້ອຍລາວພົບຫຸ່ນພົນອໍໂຕ້ບູຮານ 500 ປີ! 🤖🌿 (ໜັງ short AI)",
+                    "2. ຕຳນານອໍໂຕ້ແສງອາທິດ | AI Animated Short Film 2026",
+                    "3. ຄວາມບູຮານປະສົມອະນາຄົດ! ເລື່ອງລາວອັນອົບອຸ່ນຂອງ ຄຳຜານ & ອໍໂຕ້"
+                ],
+                description: "🎬 ຮັບຊົມໜັງສັ້ນ AI 3D Animation ເລື່ອງເລົ່າອັນອົບອຸ່ນຂອງ 'ຄຳຜານ' ເດັກຊາຍລາວ ແລະ 'ອໍໂຕ້' ຫຸ່ນພົນບູຮານ!\n\n📌 Timecodes ບົດພາກ:\n00:00 - ຄວາມລຶກລັບໃນປ່າເລິກ\n00:20 - ພະລັງຟື້ນຟູທຳມະຊາດ\n00:40 - ການປົກປ້ອງໝູ່ບ້ານ\n\n✨ ສ້າງດ້ວຍ AI: Claude, Midjourney, Kling AI & Suno\n#AIMovie #LaoAnimation #ໜັງAI #ອໍໂຕ້ບູຮານ",
+                hashtags: "#AIMovie #LaoAnimation #ShortFilm #3DPixar #LaoCreators #KlingAI #Midjourney #TikTokLao",
+                keywords: "ໜັງ AI ພາສາລາວ, AI Movie Lao, 3D Pixar Animation Lao, Khamphan and Otto, หนัง AI ลาว"
+            },
+            audio: [
+                {
+                    type: "Background Music (Suno / Udio Prompt)",
+                    prompt: "Uplifting orchestral movie soundtrack, traditional Lao wooden xylophone (Ranaat) melodies blended with futuristic synth pads, inspiring Pixar adventure theme, warm emotional strings swell, 110 BPM"
+                },
+                {
+                    type: "Sound Effects (SFX List)",
+                    prompt: "[00:00] Forest ambience, birds chirping | [00:10] Mechanical metallic activation sound, glowing energy hum | [00:30] Magical vegetation growth sound effect | [00:40] Deep thunder rumble and heavy wind gusts"
+                }
+            ]
+        };
+
+        window.onload = function() {
+            renderAllTabs();
+            checkApiStatus(true); // auto-open the key setup modal on first run if no key is saved yet
+        };
+
+async function checkApiStatus(openModalIfMissing) {
+            const badge = document.getElementById('apiStatusBadge');
+            const text = document.getElementById('apiStatusText');
+            try {
+                const res = await fetch('/api/health');
+                const data = await res.json();
+                badge.classList.remove('hidden');
+                if (data.configured) {
+                    badge.className = 'text-xs px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5 bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:opacity-80 transition cursor-pointer';
+                    text.innerText = 'Claude API: Ready (' + data.model + ')';
+                } else {
+                    badge.className = 'text-xs px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5 bg-rose-500/10 text-rose-300 border-rose-500/30 hover:opacity-80 transition cursor-pointer';
+                    text.innerText = 'Claude API: Click to set key';
+                    if (openModalIfMissing) openApiKeyModal();
+                }
+                document.getElementById('logoutBtn').classList.toggle('hidden', !data.authRequired);
+                return data;
+            } catch (e) {
+                badge.classList.remove('hidden');
+                badge.className = 'text-xs px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5 bg-rose-500/10 text-rose-300 border-rose-500/30';
+                text.innerText = 'Backend unreachable';
+                return null;
+            }
+        }
+
+        async function logout() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+            } catch (e) { /* ignore — redirecting anyway */ }
+            window.location.href = '/login';
+        }
+
+        function openApiKeyModal() {
+            const modal = document.getElementById('apiKeyModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            document.getElementById('apiKeyModalError').classList.add('hidden');
+            setTimeout(() => document.getElementById('apiKeyInput').focus(), 50);
+        }
+
+        function closeApiKeyModal() {
+            const modal = document.getElementById('apiKeyModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        async function saveApiKey() {
+            const input = document.getElementById('apiKeyInput');
+            const errorEl = document.getElementById('apiKeyModalError');
+            const btn = document.getElementById('apiKeyModalSaveBtn');
+            const key = input.value.trim();
+            errorEl.classList.add('hidden');
+
+            if (!key) {
+                errorEl.innerText = 'ກະລຸນາວາງ API key ກ່ອນ (please paste a key first).';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="ph-bold ph-circle-notch spin"></i><span>ກຳລັງບັນທຶກ...</span>';
+            try {
+                const res = await fetch('/api/set-key', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ apiKey: key })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.error || 'Save failed.');
+                }
+                input.value = '';
+                closeApiKeyModal();
+                await checkApiStatus(false);
+                showToast('ບັນທຶກ API Key ສຳເລັດແລ້ວ! ພ້ອມສ້າງໜັງໄດ້ເລີຍ.');
+            } catch (err) {
+                errorEl.innerText = err.message;
+                errorEl.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="ph-bold ph-floppy-disk"></i><span>ບັນທຶກ (Save)</span>';
+            }
+        }
+
+        function showToast(msg, isError) {
+            const toast = document.getElementById('toast');
+            const icon = document.getElementById('toastIcon');
+            document.getElementById('toastMsg').innerText = msg;
+            toast.classList.remove('bg-indigo-600', 'bg-rose-600');
+            toast.classList.add(isError ? 'bg-rose-600' : 'bg-indigo-600');
+            icon.className = isError ? 'ph-bold ph-warning-circle text-lg' : 'ph-bold ph-check-circle text-lg';
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, isError ? 5000 : 3000);
+        }
+
+        function switchTab(tabId) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            // Remove active classes
+            document.querySelectorAll('[id^="nav-tab-"]').forEach(btn => {
+                btn.classList.remove('active-tab');
+                btn.classList.add('text-slate-400');
+            });
+
+            // Show selected tab
+            document.getElementById(tabId).classList.remove('hidden');
+            const navBtn = document.getElementById('nav-' + tabId);
+            if (navBtn) {
+                navBtn.classList.add('active-tab');
+                navBtn.classList.remove('text-slate-400');
+            }
+        }
+
+        function copyToClipboard(elementId) {
+            let text = "";
+            const el = document.getElementById(elementId);
+            if (el) {
+                text = el.innerText || el.textContent;
+            }
+
+            // Native Copy fallback
+            const textarea = document.createElement("textarea");
+            textarea.value = text;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+
+            showToast("ກັອບປີ້ (Copy) ສຳເລັດແລ້ວ!");
+        }
+
+        function renderAllTabs() {
+            // 1. Story Tab
+            document.getElementById('outLogline').innerText = currentProject.logline;
+            document.getElementById('outTheme').innerText = currentProject.theme;
+            document.getElementById('outArtStyle').innerText = currentProject.artStyle;
+            document.getElementById('outAct1').innerText = currentProject.act1;
+            document.getElementById('outAct2').innerText = currentProject.act2;
+            document.getElementById('outAct3').innerText = currentProject.act3;
+
+            // 2. Voiceover Tab
+            const voBox = document.getElementById('voContent');
+            voBox.innerHTML = currentProject.voiceover.map((item, idx) => `
+                <div class="p-3.5 bg-slate-900/60 rounded-xl border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-2">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs font-mono px-2 py-1 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-bold">${item.time}</span>
+                        <span class="text-xs px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">[${item.emotion}]</span>
+                    </div>
+                    <p class="text-xs text-slate-200 font-medium flex-grow md:ml-3">${item.text}</p>
+                    <button onclick="navigator.clipboard.writeText('${item.text}')" class="text-xs text-slate-400 hover:text-indigo-300 self-end md:self-auto"><i class="ph-bold ph-copy"></i></button>
+                </div>
+            `).join('');
+
+            // 3. Characters Tab
+            const charBox = document.getElementById('characterList');
+            charBox.innerHTML = currentProject.characters.map((c, i) => `
+                <div class="p-4 bg-slate-900/60 rounded-xl border border-slate-800 space-y-2">
+                    <div class="flex items-center justify-between">
+                        <h4 class="font-bold text-slate-100 text-sm">${c.name}</h4>
+                        <span class="text-xs px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">${c.age} | ${c.role}</span>
+                    </div>
+                    <p class="text-xs text-slate-300 leading-relaxed"><strong>ລັກສະນະ:</strong> ${c.visual}</p>
+                    <div class="pt-2 border-t border-slate-800/80">
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="text-[10px] font-bold uppercase tracking-wider text-indigo-400">Character Anchor Prompt:</span>
+                            <button onclick="navigator.clipboard.writeText('${c.anchor.replace(/'/g, "\\'")}')" class="text-[11px] text-indigo-400 hover:underline">Copy Anchor</button>
+                        </div>
+                        <p class="text-[11px] text-slate-400 font-mono bg-slate-950/80 p-2 rounded-lg border border-slate-800 leading-normal select-all">${c.anchor}</p>
+                    </div>
+                </div>
+            `).join('');
+
+            // 4. Storyboard Tab
+            const sbBox = document.getElementById('storyboardContainer');
+            sbBox.innerHTML = currentProject.storyboard.map((sb, idx) => `
+                <div class="p-4 bg-slate-900/60 rounded-xl border border-slate-800 space-y-3">
+                    <div class="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                        <div class="flex items-center gap-2">
+                            <span class="w-6 h-6 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center">${sb.scene}</span>
+                            <span class="text-xs font-semibold text-slate-200">Scene ${sb.scene} (${sb.time})</span>
+                        </div>
+                        <button onclick="removeScene(${idx})" class="text-xs text-rose-400 hover:text-rose-300"><i class="ph-bold ph-trash"></i> ລົບ</button>
+                    </div>
+                    <p class="text-xs text-slate-300 font-medium">${sb.desc}</p>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                        <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800 space-y-1">
+                            <div class="flex items-center justify-between">
+                                <span class="text-[10px] font-bold text-amber-400 uppercase">Image Prompt (Midjourney / Flux):</span>
+                                <button onclick="navigator.clipboard.writeText('${sb.imagePrompt.replace(/'/g, "\\'")}')" class="text-[10px] text-indigo-400 hover:underline">Copy</button>
+                            </div>
+                            <p class="text-[11px] text-slate-300 font-mono select-all leading-relaxed">${sb.imagePrompt}</p>
+                        </div>
+
+                        <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800 space-y-1">
+                            <div class="flex items-center justify-between">
+                                <span class="text-[10px] font-bold text-emerald-400 uppercase">Video Motion Prompt (Kling / Runway):</span>
+                                <button onclick="navigator.clipboard.writeText('${sb.motionPrompt.replace(/'/g, "\\'")}')" class="text-[10px] text-indigo-400 hover:underline">Copy</button>
+                            </div>
+                            <p class="text-[11px] text-slate-300 font-mono select-all leading-relaxed">${sb.motionPrompt}</p>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            // 5. Locations Tab
+            const locBox = document.getElementById('locationList');
+            locBox.innerHTML = currentProject.locations.map(l => `
+                <div class="p-4 bg-slate-900/60 rounded-xl border border-slate-800 space-y-2">
+                    <h4 class="font-bold text-slate-100 text-sm">${l.name}</h4>
+                    <p class="text-xs text-slate-300">${l.desc}</p>
+                    <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800">
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="text-[10px] font-bold text-cyan-400 uppercase">Background Prompt:</span>
+                            <button onclick="navigator.clipboard.writeText('${l.prompt.replace(/'/g, "\\'")}')" class="text-[10px] text-indigo-400 hover:underline">Copy Prompt</button>
+                        </div>
+                        <p class="text-[11px] text-slate-300 font-mono select-all">${l.prompt}</p>
+                    </div>
+                </div>
+            `).join('');
+
+            // 6. Posters Tab
+            const posterBox = document.getElementById('posterContainer');
+            posterBox.innerHTML = currentProject.posters.map(p => `
+                <div class="p-4 bg-slate-900/60 rounded-xl border border-slate-800 space-y-2">
+                    <h4 class="font-bold text-slate-100 text-sm">${p.title}</h4>
+                    <p class="text-xs text-amber-300"><strong>Text Overlay:</strong> ${p.textOverlay}</p>
+                    <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800">
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="text-[10px] font-bold text-rose-400 uppercase">Poster Image Prompt:</span>
+                            <button onclick="navigator.clipboard.writeText('${p.prompt.replace(/'/g, "\\'")}')" class="text-[10px] text-indigo-400 hover:underline">Copy</button>
+                        </div>
+                        <p class="text-[11px] text-slate-300 font-mono select-all leading-relaxed">${p.prompt}</p>
+                    </div>
+                </div>
+            `).join('');
+
+            // 7. Social Tab
+            document.getElementById('socialTitles').innerHTML = currentProject.social.titles.map(t => `<p>${t}</p>`).join('');
+            document.getElementById('socialDescription').innerText = currentProject.social.description;
+            document.getElementById('socialHashtags').innerText = currentProject.social.hashtags;
+            document.getElementById('socialKeywords').innerText = currentProject.social.keywords;
+
+            // 8. Audio Tab
+            const audioBox = document.getElementById('audioContainer');
+            audioBox.innerHTML = currentProject.audio.map(a => `
+                <div class="p-4 bg-slate-900/60 rounded-xl border border-slate-800 space-y-2">
+                    <h4 class="font-bold text-amber-300 text-xs uppercase tracking-wider">${a.type}</h4>
+                    <div class="bg-slate-950/80 p-3 rounded-lg border border-slate-800">
+                        <p class="text-xs text-slate-200 font-mono select-all leading-relaxed">${a.prompt}</p>
+                    </div>
+                    <button onclick="navigator.clipboard.writeText('${a.prompt.replace(/'/g, "\\'")}')" class="text-xs text-indigo-400 hover:underline flex items-center gap-1">
+                        <i class="ph-bold ph-copy"></i> Copy Audio Prompt
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        function setGenerating(isGenerating) {
+            const btn = document.getElementById('btnGenerate');
+            const icon = document.getElementById('btnGenerateIcon');
+            const label = document.getElementById('btnGenerateLabel');
+            btn.disabled = isGenerating;
+            if (isGenerating) {
+                icon.className = 'ph-bold ph-circle-notch text-lg spin';
+                label.innerText = 'Claude ກຳລັງສ້າງ Package ໜັງ... (Generating...)';
+            } else {
+                icon.className = 'ph-bold ph-magic-wand text-lg';
+                label.innerText = 'ປະມວນຜົນສ້າງ Package ໜັງ AI (Generate with Claude)';
+            }
+        }
+
+        async function generateMoviePackage() {
+            const concept = document.getElementById('inputConcept').value.trim();
+            const genre = document.getElementById('inputGenre').value;
+            const format = document.getElementById('inputFormat').value;
+            const audience = document.getElementById('inputAudience').value;
+            const duration = document.getElementById('inputDuration').value;
+            const platforms = Array.from(document.querySelectorAll('.platform-checkbox:checked')).map(cb => cb.value);
+            const errorBox = document.getElementById('generateError');
+            errorBox.classList.add('hidden');
+
+            if (!concept) {
+                errorBox.innerText = 'ກະລຸນາປ້ອນໄອເດຍໜັງກ່ອນ (Please enter a story concept first).';
+                errorBox.classList.remove('hidden');
+                return;
+            }
+
+            setGenerating(true);
+
+            // Guard against an indefinite hang (e.g. server unreachable, or
+            // Claude taking unusually long on a big scene count) with a
+            // client-side timeout, so the user gets a clear message instead
+            // of a spinner that never resolves.
+            const controller = new AbortController();
+            const timeoutMs = 4 * 60 * 1000; // 4 minutes
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+            try {
+                let res;
+                try {
+                    res = await fetch('/api/generate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ concept, genre, format, audience, duration, platforms }),
+                        signal: controller.signal
+                    });
+                } catch (networkErr) {
+                    if (networkErr.name === 'AbortError') {
+                        throw new Error('ໝົດເວລາ (timed out) waiting for Claude after ' + (timeoutMs / 1000) + 's. The server may be unreachable — check the terminal/console window that opened when you launched the app.');
+                    }
+                    // A raw "Failed to fetch" / "NetworkError" here means the
+                    // browser could not even reach the local server: it isn't
+                    // running, it crashed, or something else is blocking the
+                    // connection to http://localhost.
+                    throw new Error('Could not reach the AI Movie Architect server (network error: ' + networkErr.message + '). Make sure the app is still running (the terminal/console window it opened), then reload this page.');
+                }
+
+                let data;
+                try {
+                    data = await res.json();
+                } catch (parseErr) {
+                    throw new Error('Server returned an unreadable response (HTTP ' + res.status + '). Check the terminal/console window the app opened for the full error.');
+                }
+
+                if (res.status === 401 && data.loginRequired) {
+                    window.location.href = '/login';
+                    return;
+                }
+
+                if (!res.ok) {
+                    throw new Error(data.error || 'Generation failed (HTTP ' + res.status + ')');
+                }
+
+                // Merge Claude's generated package with the locally-known setup fields
+                currentProject = Object.assign({}, data, { genre, format, audience, duration });
+                renderAllTabs();
+                switchTab('tab-story');
+                showToast('ສ້າງ Package ໜັງ AI ສຳເລັດແລ້ວ! (Package generated by Claude)');
+            } catch (err) {
+                console.error(err);
+                errorBox.innerText = err.message;
+                errorBox.classList.remove('hidden');
+                showToast('ເກີດຂໍ້ຜິດພາດ: ' + err.message, true);
+            } finally {
+                clearTimeout(timeoutId);
+                setGenerating(false);
+            }
+        }
+
+        function loadSampleProject() {
+            document.getElementById('inputConcept').value = "ເດັກນ້ອຍລາວຜູ້ໜຶ່ງຄົ້ນພົບຫຸ່ນພົນອໍໂຕ້ໃນປ່າບູຮານ ເຊິ່ງສາມາດປ່ຽນພະລັງງານແສງອາທິດມາເປັນເຄື່ອງປູກຜັກອັດໂຕໂນມັດ...";
+            renderAllTabs();
+            showToast("ໂຫຼດ Project ຕົວຢ່າງສຳເລັດ!");
+        }
+
+        function addNewScene() {
+            const newNum = currentProject.storyboard.length + 1;
+            currentProject.storyboard.push({
+                scene: newNum,
+                time: `00:${String((newNum-1)*10).padStart(2,'0')} - 00:${String(newNum*10).padStart(2,'0')}`,
+                desc: `Scene ${newNum} - ເຫດການເພີ່ມເຕິມຂອງຕົວລະຄອນ`,
+                imagePrompt: `Cinematic shot of the main characters in scene ${newNum}, ${currentProject.genre}, consistent with previous scenes --ar 9:16`,
+                motionPrompt: "Dynamic camera pan, smooth cinematic motion."
+            });
+            renderAllTabs();
+            showToast(`ເພີ່ມ Scene ${newNum} ສຳເລັດ!`);
+        }
+
+        function removeScene(index) {
+            currentProject.storyboard.splice(index, 1);
+            // Re-index scene numbers
+            currentProject.storyboard.forEach((sb, i) => sb.scene = i + 1);
+            renderAllTabs();
+            showToast("ລົບ Scene ສຳເລັດ!");
+        }
+
+        function exportJSON() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(currentProject, null, 2));
+            const dlAnchorElem = document.createElement('a');
+            dlAnchorElem.setAttribute("href", dataStr);
+            dlAnchorElem.setAttribute("download", `ai_movie_package_${Date.now()}.json`);
+            dlAnchorElem.click();
+            showToast("Export JSON ສຳເລັດ!");
+        }
+
+        function exportMarkdown() {
+            let md = `# ${currentProject.title}\n\n`;
+            md += `**Genre:** ${currentProject.genre} | **Format:** ${currentProject.format} | **Audience:** ${currentProject.audience} | **Duration:** ${currentProject.duration}\n\n`;
+            md += `## 1. Story Logline\n${currentProject.logline}\n\n`;
+            md += `**Theme:** ${currentProject.theme}\n\n**Art Style:** ${currentProject.artStyle}\n\n`;
+            md += `### Act 1\n${currentProject.act1}\n\n### Act 2\n${currentProject.act2}\n\n### Act 3\n${currentProject.act3}\n\n`;
+            md += `## 2. Lao Voiceover Script\n`;
+            currentProject.voiceover.forEach(v => {
+                md += `- **[${v.time}] [${v.emotion}]**: ${v.text}\n`;
+            });
+            md += `\n## 3. Characters\n`;
+            currentProject.characters.forEach(c => {
+                md += `### ${c.name} (${c.role}, ${c.age})\n- Visual: ${c.visual}\n- Anchor Prompt: \`${c.anchor}\`\n\n`;
+            });
+            md += `## 4. Storyboard Prompts\n`;
+            currentProject.storyboard.forEach(s => {
+                md += `### Scene ${s.scene} (${s.time})\n- Desc: ${s.desc}\n- Image Prompt: \`${s.imagePrompt}\`\n- Motion Prompt: \`${s.motionPrompt}\`\n\n`;
+            });
+            md += `## 5. Locations\n`;
+            (currentProject.locations || []).forEach(l => {
+                md += `### ${l.name}\n- ${l.desc}\n- Prompt: \`${l.prompt}\`\n\n`;
+            });
+            md += `## 6. Poster Concepts\n`;
+            (currentProject.posters || []).forEach(p => {
+                md += `### ${p.title}\n- Text Overlay: ${p.textOverlay}\n- Prompt: \`${p.prompt}\`\n\n`;
+            });
+            md += `## 7. Social Media Package\n**Titles:**\n`;
+            ((currentProject.social || {}).titles || []).forEach(t => { md += `- ${t}\n`; });
+            md += `\n**Description:**\n${(currentProject.social || {}).description || ''}\n\n`;
+            md += `**Hashtags:** ${(currentProject.social || {}).hashtags || ''}\n\n`;
+            md += `**SEO Keywords:** ${(currentProject.social || {}).keywords || ''}\n\n`;
+            md += `## 8. Audio & SFX Prompts\n`;
+            (currentProject.audio || []).forEach(a => {
+                md += `### ${a.type}\n${a.prompt}\n\n`;
+            });
+
+            const blob = new Blob([md], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `AI_Movie_Script_${Date.now()}.md`;
+            a.click();
+            showToast("Export Markdown ສຳເລັດ!");
+        }
+    </script>
+</body>
+</html>
