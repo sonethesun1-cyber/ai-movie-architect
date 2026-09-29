@@ -552,27 +552,71 @@ app.post('/api/generate', async (req, res) => {
     console.log(`[generate] concept="${concept.slice(0, 60)}..." scenes=${sceneCount} model=${MODEL}`);
     const started = Date.now();
 
+    // A fixed 8192-token ceiling was too tight once real users pasted long,
+    // detailed concepts (a full character list / treatment) alongside a high
+    // scene count: Claude would hit the limit mid-way through writing the
+    // tool call's JSON, so the response arrived with entire fields (locations,
+    // posters, social, audio, or the tail of storyboard/voiceover) silently
+    // missing. The frontend then crashed on the first `.map()` over an
+    // undefined field, which also stopped every tab after that from
+    // rendering — that's the "some pages don't work" bug. Scaling the budget
+    // with scene count, and hard-failing below if we still get cut off
+    // instead of shipping a half-built package, fixes both.
+    // Now also covers the longer 30/60-scene Duration options — the 30000
+    // ceiling comfortably fits a 60-scene package (~15k tokens in practice)
+    // with headroom; if a request still runs out, the stop_reason check
+    // below turns that into a clear error instead of a broken package.
+    const maxTokens = Math.min(30000, 3000 + sceneCount * 450);
+
+    // Longer packages take Claude noticeably longer to write. The SDK-level
+    // default (set on the `anthropic` client below) is a safety net for
+    // small requests; this per-request override gives big ones (30/60
+    // scenes) enough time instead of failing right as they're about to finish.
+    const requestTimeoutMs = Math.min(9 * 60 * 1000, 90 * 1000 + sceneCount * 8000);
+
     const response = await anthropic.messages.create({
       model: MODEL,
-      max_tokens: 8192,
+      max_tokens: maxTokens,
       system: SYSTEM_PROMPT,
       tools: [tool],
       tool_choice: { type: 'tool', name: 'submit_movie_package' },
       messages: [{ role: 'user', content: userPrompt }],
-    });
+    }, { timeout: requestTimeoutMs });
 
-    console.log(`[generate] Claude responded in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+    console.log(`[generate] Claude responded in ${((Date.now() - started) / 1000).toFixed(1)}s (stop_reason=${response.stop_reason}, max_tokens=${maxTokens})`);
+
+    // If Claude ran out of room before finishing the tool call, the JSON it
+    // produced is necessarily incomplete (missing trailing fields). Refuse
+    // it here with a clear, actionable message instead of forwarding a
+    // package that will crash the dashboard.
+    if (response.stop_reason === 'max_tokens') {
+      return res.status(502).json({
+        error: `Claude ໃຊ້ພື້ນທີ່ຄຳຕອບໝົດກ່ອນຈະສ້າງ Package ສຳເລັດ (output length limit reached) — ມັກເກີດເມື່ອ "ໄອເດຍ/ເນື້ອເລື່ອງ" ທີ່ພິມໃສ່ຍາວ ແລະ ລະອຽດຫຼາຍ, ຫຼືເລືອກຄວາມຍາວ (scenes) ສູງ. ລອງຫຍໍ້ຄວາມຍາວຂອງໄອເດຍທີ່ພິມໃສ່ໃຫ້ສັ້ນລົງ (ສະຫຼຸບໄອເດຍພຽງ 2-4 ປະໂຫຍກກໍ່ພໍ), ຫຼືເລືອກ Duration ໃຫ້ສັ້ນລົງ, ແລ້ວລອງໃໝ່.`,
+      });
+    }
 
     const toolUse = response.content.find((block) => block.type === 'tool_use' && block.name === 'submit_movie_package');
     if (!toolUse) {
       return res.status(502).json({ error: 'Claude did not return a structured package. Please try again.' });
     }
 
-    // Re-number scenes defensively in case the model's numbering drifted.
     const pkg = toolUse.input;
-    if (Array.isArray(pkg.storyboard)) {
-      pkg.storyboard.forEach((s, i) => { s.scene = i + 1; });
+
+    // Defensive validation: even without hitting max_tokens, make sure every
+    // field the dashboard's renderer unconditionally calls .map()/.forEach()
+    // on actually came back as an array, so a malformed response is caught
+    // here (as a clear error) instead of crashing the frontend.
+    const requiredArrayFields = ['voiceover', 'characters', 'storyboard', 'locations', 'posters', 'audio'];
+    const missingOrInvalid = requiredArrayFields.filter((f) => !Array.isArray(pkg[f]) || pkg[f].length === 0);
+    if (missingOrInvalid.length > 0 || !pkg.social || !Array.isArray(pkg.social.titles)) {
+      console.error('[generate] incomplete package from Claude, missing/invalid:', missingOrInvalid);
+      return res.status(502).json({
+        error: `Claude ສົ່ງ Package ກັບມາບໍ່ຄົບ (ຂາດສ່ວນ: ${missingOrInvalid.join(', ') || 'social'}). ລອງກົດ Generate ໃໝ່ອີກຄັ້ງ, ຫຼືຫຍໍ້ຄວາມຍາວ/ຄວາມສັບຊ້ອນຂອງໄອເດຍລົງ.`,
+      });
     }
+
+    // Re-number scenes defensively in case the model's numbering drifted.
+    pkg.storyboard.forEach((s, i) => { s.scene = i + 1; });
 
     recordUsage(response.usage);
     pkg._usage = getUsageSummary(); // lets the frontend update the big usage display without a second round trip

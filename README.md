@@ -40,10 +40,12 @@ The header shows a small badge — green ("Claude API: Ready") once a key is set
 ## Using it
 
 1. Type your story concept (Lao or English) in the sidebar, pick genre, aspect ratio, audience, duration, and target platforms.
-2. Click **"ປະມວນຜົນສ້າງ Package ໜັງ AI (Generate with Claude)."** The button shows a spinner while Claude writes the full package (usually 15–40 seconds depending on scene count).
-3. Browse all 8 tabs — story, voiceover, characters, storyboard, locations, posters, social, audio. Every prompt field has a one-click Copy button.
+2. Click **"ປະມວນຜົນສ້າງ Package ໜັງ AI (Generate with Claude)."** The button shows a spinner while Claude writes the full package: roughly 15–40 seconds for 1–3 minutes (6–18 scenes), and up to a few minutes for the longer 5/10-minute options (30/60 scenes) — the longer options also cost proportionally more per generation (see the usage banner).
+3. Browse all 9 tabs — story, voiceover, characters, storyboard, locations, posters, social, audio, and the edit sheet. Every prompt field has a one-click Copy button.
 4. Use **Export JSON** or **Export MD** in the header to download the whole package for pasting into Midjourney, Flux, Google Flow, Kling, Runway, Suno, Udio, or ElevenLabs.
 5. **"ໂຫຼດຕົວຢ່າງ (Sample)"** just refills the concept box with the demo example and re-renders the built-in sample package — it doesn't call the API, so it's free to click around with.
+
+**Scope note:** Duration tops out at 10 minutes (60 scenes) per generation — this is a short-form/social-video tool (TikTok, Shorts, Reels), not a feature-film generator. A single generation producing a full-length (60–120 minute) movie package isn't supported: it would mean hundreds of scenes, which is well beyond what one Claude API call can reliably produce, and would cost proportionally more per generation. If you have a longer story, describe it briefly as the concept and pick the longest duration that fits your platform — Claude will condense it into a short-form treatment rather than trying (and failing) to cover the whole thing scene-by-scene.
 
 ## How the generation works
 
