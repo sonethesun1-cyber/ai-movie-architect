@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Movie Architect - ໂຄງການສ້າງໜັງ AI</title>
+    <link rel="icon" type="image/png" href="/favicon.png">
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -105,8 +106,8 @@
     <header class="sticky top-0 z-50 glass-panel border-b border-slate-800/80 px-4 lg:px-8 py-3.5">
         <div class="max-w-7xl mx-auto flex items-center justify-between">
             <div class="flex items-center space-x-3">
-                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-amber-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-                    <i class="ph-bold ph-film-slate text-2xl text-white"></i>
+                <div class="w-10 h-10 rounded-xl overflow-hidden shadow-lg shadow-indigo-500/20 flex-shrink-0">
+                    <img src="/icon.png" alt="AI Movie Architect" class="w-full h-full object-cover">
                 </div>
                 <div>
                     <h1 class="text-lg font-bold bg-gradient-to-r from-white via-slate-200 to-indigo-300 bg-clip-text text-transparent">
@@ -139,6 +140,38 @@
             </div>
         </div>
     </header>
+
+    <!-- Usage / Cost Tracker Banner -->
+    <div class="max-w-7xl w-full mx-auto px-4 lg:px-8 pt-4">
+        <div id="usageBanner" class="glass-panel rounded-2xl border border-slate-800 p-4 lg:p-5 hidden">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 rounded-xl bg-gradient-to-tr from-amber-500 via-orange-500 to-rose-500 flex items-center justify-center shadow-lg shadow-amber-500/20 flex-shrink-0">
+                        <i class="ph-bold ph-coin text-2xl text-white"></i>
+                    </div>
+                    <div>
+                        <p class="text-xs text-slate-400 mb-0.5">ໃຊ້ໄປແລ້ວ (Credit used, this app)</p>
+                        <p id="usageCostBig" class="text-3xl lg:text-4xl font-extrabold bg-gradient-to-r from-amber-300 via-orange-300 to-rose-300 bg-clip-text text-transparent leading-none">$0.00</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4 sm:gap-6">
+                    <div class="text-center sm:text-right">
+                        <p id="usageGenCount" class="text-lg font-bold text-slate-100">0</p>
+                        <p class="text-[11px] text-slate-400">ຄັ້ງສ້າງ (generations)</p>
+                    </div>
+                    <div class="text-center sm:text-right">
+                        <p id="usageTokenCount" class="text-lg font-bold text-slate-100">0</p>
+                        <p class="text-[11px] text-slate-400">Tokens (in+out)</p>
+                    </div>
+                    <button onclick="resetUsage()" class="text-xs px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition flex items-center gap-1.5 flex-shrink-0" title="Reset this counter to zero, e.g. right after you top up credits">
+                        <i class="ph-bold ph-arrow-counter-clockwise"></i>
+                        <span>Reset</span>
+                    </button>
+                </div>
+            </div>
+            <p id="usagePricingNote" class="text-[11px] text-slate-500 mt-3 pt-3 border-t border-slate-800/80"></p>
+        </div>
+    </div>
 
     <main class="flex-grow max-w-7xl w-full mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
 
@@ -189,13 +222,16 @@
                         </div>
                         <div>
                             <label class="block text-xs font-medium text-slate-300 mb-1">ຄວາມຍາວ (Duration)</label>
-                            <select id="inputDuration" class="w-full glass-input rounded-xl p-2.5 text-xs">
+                            <select id="inputDuration" class="w-full glass-input rounded-xl p-2.5 text-xs" onchange="updateDurationHint()">
                                 <option value="1 Minute (6 Scenes)">1 ນາທີ (6 ສາກ)</option>
                                 <option value="2 Minutes (12 Scenes)">2 ນາທີ (12 ສາກ)</option>
                                 <option value="3 Minutes (18 Scenes)">3 ນາທີ (18 ສາກ)</option>
+                                <option value="5 Minutes (30 Scenes)">5 ນາທີ (30 ສາກ)</option>
+                                <option value="10 Minutes (60 Scenes)">10 ນາທີ (60 ສາກ)</option>
                             </select>
                         </div>
                     </div>
+                    <p id="durationHint" class="text-[10px] text-slate-500 -mt-1.5"></p>
 
                     <div>
                         <label class="block text-xs font-medium text-slate-300 mb-1">ອອນໄລນ໌ / ແພລັດຟອມ (Target Platform)</label>
@@ -260,6 +296,10 @@
                 <button onclick="switchTab('tab-audio')" id="nav-tab-audio" class="flex-shrink-0 px-3.5 py-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition flex items-center gap-1.5 font-medium border border-transparent">
                     <i class="ph-bold ph-music-notes"></i>
                     <span>8. ສຽງ BGM & Audio</span>
+                </button>
+                <button onclick="switchTab('tab-editsheet')" id="nav-tab-editsheet" class="flex-shrink-0 px-3.5 py-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition flex items-center gap-1.5 font-medium border border-transparent">
+                    <i class="ph-bold ph-scissors"></i>
+                    <span>9. ໃບສັ່ງຕັດຕໍ່ (Edit Sheet)</span>
                 </button>
             </div>
 
@@ -464,6 +504,36 @@
                 </div>
             </div>
 
+            <!-- Tab 9: Edit Sheet (cutting order for CapCut / Premiere / etc.) -->
+            <div id="tab-editsheet" class="tab-content hidden space-y-4">
+                <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
+                        <h3 class="font-bold text-slate-100 flex items-center gap-2">
+                            <i class="ph-bold ph-scissors text-rose-400"></i>
+                            <span>ໃບສັ່ງຕັດຕໍ່ວິດີໂອ (Video Edit / Cutting Sheet)</span>
+                        </h3>
+                        <button onclick="exportEditSheet()" class="text-xs px-3 py-1.5 rounded-lg bg-rose-900/40 hover:bg-rose-800/60 text-rose-300 border border-rose-700/50 transition flex items-center gap-1.5">
+                            <i class="ph-bold ph-download-simple"></i>
+                            <span>Export ໃບຕັດຕໍ່ (.md)</span>
+                        </button>
+                    </div>
+
+                    <div class="bg-indigo-500/10 border border-indigo-500/30 rounded-xl p-3.5 text-xs text-indigo-200 leading-relaxed space-y-1.5">
+                        <p class="font-semibold flex items-center gap-1.5"><i class="ph-bold ph-info"></i> ແອັບນີ້ຍັງບໍ່ໄດ້ຕັດຕໍ່ວິດີໂອອັດຕະໂນມັດ — ນີ້ແມ່ນ "ໃບສັ່ງ" ລຳດັບການຕັດຕໍ່, ອີງໃສ່ Storyboard ທີ່ Claude ສ້າງໃຫ້, ເພື່ອໃຫ້ທ່ານເອົາໄປໃຊ້ຕັດຕໍ່ເອງໃນໂປຣແກຣມທີ່ຖະນັດໄດ້ໄວຂຶ້ນ.</p>
+                        <p>ຂັ້ນຕອນແນະນຳ: 1) Copy Image Prompt ແຕ່ລະ Scene ໄປສ້າງຮູບໃນ Midjourney/Flux &nbsp;→&nbsp; 2) Copy Motion Prompt ໄປສ້າງວິດີໂອສັ້ນໃນ Kling/Runway ຈາກຮູບນັ້ນ &nbsp;→&nbsp; 3) ສ້າງສຽງພາກຈາກຂໍ້ຄວາມ Voiceover ດ້ວຍ ElevenLabs (ລຽງຕາມ Scene) &nbsp;→&nbsp; 4) ເອົາຄລິບວິດີໂອທັງໝົດມາຮຽງຕໍ່ກັນຕາມລຳດັບ Scene ລຸ່ມນີ້ໃນ CapCut/Premiere/DaVinci &nbsp;→&nbsp; 5) ໃສ່ສຽງພາກ+ດົນຕີ+SFX ຕາມທ້າຍໜ້ານີ້.</p>
+                    </div>
+
+                    <div id="editSheetContainer" class="space-y-3 text-xs">
+                        <!-- Edit sheet scene cards dynamically rendered -->
+                    </div>
+
+                    <div class="pt-2 border-t border-slate-800/80">
+                        <h4 class="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-2 flex items-center gap-1.5"><i class="ph-bold ph-music-notes"></i> ດົນຕີ & SFX ທີ່ຈະໃສ່ຕອນຕັດຕໍ່</h4>
+                        <div id="editSheetAudioContainer" class="space-y-2 text-xs"></div>
+                    </div>
+                </div>
+            </div>
+
         </section>
     </main>
 
@@ -651,7 +721,69 @@
         window.onload = function() {
             renderAllTabs();
             checkApiStatus(true); // auto-open the key setup modal on first run if no key is saved yet
+            fetchUsage();
+            updateDurationHint();
         };
+
+        // Mirrors the server's getSceneCount() parsing so the client can size its
+        // own request timeout and show a heads-up before longer generations.
+        function getSceneCountClient(duration) {
+            const match = /\((\d+)\s*Scenes?\)/i.exec(duration || '');
+            return match ? parseInt(match[1], 10) : 6;
+        }
+
+        function updateDurationHint() {
+            const duration = document.getElementById('inputDuration').value;
+            const sceneCount = getSceneCountClient(duration);
+            const hint = document.getElementById('durationHint');
+            if (sceneCount >= 30) {
+                hint.innerText = 'ຄວາມຍາວລະດັບນີ້ (' + sceneCount + ' ສາກ) ໃຊ້ເວລາສ້າງດົນກວ່າປົກກະຕິ (ອາດເຖິງຫຼາຍນາທີ) ແລະ ໃຊ້ Credit ຫຼາຍກວ່າຄວາມຍາວສັ້ນໆ.';
+            } else {
+                hint.innerText = '';
+            }
+        }
+
+        // Formats a number of tokens compactly (e.g. 12,345 or 1.2M) for the small counters.
+        function formatTokenCount(n) {
+            n = n || 0;
+            if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+            if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+            return String(n);
+        }
+
+        // Renders the big usage/cost banner from a /api/usage-shaped summary object.
+        function renderUsage(usage) {
+            if (!usage) return;
+            const banner = document.getElementById('usageBanner');
+            banner.classList.remove('hidden');
+            document.getElementById('usageCostBig').innerText = '$' + usage.estimatedCostUsd.toFixed(usage.estimatedCostUsd < 1 ? 4 : 2);
+            document.getElementById('usageGenCount').innerText = usage.generations;
+            document.getElementById('usageTokenCount').innerText = formatTokenCount(usage.inputTokens + usage.outputTokens);
+            const note = document.getElementById('usagePricingNote');
+            note.innerText = usage.pricingKnown
+                ? 'ຄ່າປະມານໂດຍອີງໃສ່ລາຄາຂອງ ' + usage.model + ' — ນີ້ແມ່ນຕົວເລກປະມານຈາກແອັບນີ້ເທົ່ານັ້ນ, ບໍ່ແມ່ນຍອດເງິນຈິງໃນບັນຊີ Anthropic ຂອງທ່ານ (estimate only, based on ' + usage.model + ' pricing — not your real Anthropic account balance).'
+                : 'Pricing for model "' + usage.model + '" is not in this app\'s price table yet, so this total counts tokens only (cost estimate unavailable). This is an estimate from this app only, not your real Anthropic account balance.';
+        }
+
+        async function fetchUsage() {
+            try {
+                const res = await fetch('/api/usage');
+                if (!res.ok) return;
+                renderUsage(await res.json());
+            } catch (e) { /* non-critical — leave banner as-is */ }
+        }
+
+        async function resetUsage() {
+            if (!confirm('ຣີເຊັດຕົວນັບການໃຊ້ໄປເປັນ $0.00 ບໍ? (Reset the usage counter back to $0.00? Useful right after you top up credits.)')) return;
+            try {
+                const res = await fetch('/api/usage/reset', { method: 'POST' });
+                if (!res.ok) throw new Error('Reset failed');
+                renderUsage(await res.json());
+                showToast('ຣີເຊັດຕົວນັບການໃຊ້ແລ້ວ!');
+            } catch (e) {
+                showToast('Could not reset usage counter: ' + e.message, true);
+            }
+        }
 
 async function checkApiStatus(openModalIfMissing) {
             const badge = document.getElementById('apiStatusBadge');
@@ -787,6 +919,23 @@ async function checkApiStatus(openModalIfMissing) {
         }
 
         function renderAllTabs() {
+            // Defensive fallbacks: the server now validates every one of
+            // these before responding (see /api/generate), but this keeps
+            // one missing/odd field (e.g. from an older cached export you
+            // reloaded) from crashing every tab that comes after it — each
+            // tab just renders empty instead of the whole dashboard breaking.
+            currentProject.voiceover = currentProject.voiceover || [];
+            currentProject.characters = currentProject.characters || [];
+            currentProject.storyboard = currentProject.storyboard || [];
+            currentProject.locations = currentProject.locations || [];
+            currentProject.posters = currentProject.posters || [];
+            currentProject.audio = currentProject.audio || [];
+            currentProject.social = currentProject.social || {};
+            currentProject.social.titles = currentProject.social.titles || [];
+            currentProject.social.description = currentProject.social.description || '';
+            currentProject.social.hashtags = currentProject.social.hashtags || '';
+            currentProject.social.keywords = currentProject.social.keywords || '';
+
             // 1. Story Tab
             document.getElementById('outLogline').innerText = currentProject.logline;
             document.getElementById('outTheme').innerText = currentProject.theme;
@@ -911,6 +1060,52 @@ async function checkApiStatus(openModalIfMissing) {
                     </button>
                 </div>
             `).join('');
+
+            // 9. Edit Sheet Tab — combines storyboard + matching voiceover line into
+            // one scene-by-scene cutting order, plus the audio/SFX prompts to add last.
+            // Purely a client-side re-arrangement of data already generated above —
+            // no server call, no actual video files.
+            const editSheetBox = document.getElementById('editSheetContainer');
+            const vo = currentProject.voiceover || [];
+            editSheetBox.innerHTML = currentProject.storyboard.map((sb, idx) => {
+                const voLine = vo[idx]; // scene count == voiceover count, generated 1:1 in order
+                return `
+                <div class="p-4 bg-slate-900/60 rounded-xl border border-slate-800 space-y-2.5">
+                    <div class="flex items-center gap-2">
+                        <span class="w-6 h-6 rounded-full bg-rose-600 text-white font-bold text-xs flex items-center justify-center flex-shrink-0">${sb.scene}</span>
+                        <span class="text-xs font-mono px-2 py-1 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 font-bold">${sb.time}</span>
+                        <span class="text-xs text-slate-300 font-medium">${sb.desc}</span>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-2.5 pt-1">
+                        <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800 space-y-1">
+                            <span class="text-[10px] font-bold text-amber-400 uppercase block">1. Image → Midjourney/Flux</span>
+                            <p class="text-[10px] text-slate-400 font-mono leading-relaxed line-clamp-3">${sb.imagePrompt}</p>
+                            <button onclick="navigator.clipboard.writeText('${sb.imagePrompt.replace(/'/g, "\\'")}')" class="text-[10px] text-indigo-400 hover:underline">Copy</button>
+                        </div>
+                        <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800 space-y-1">
+                            <span class="text-[10px] font-bold text-emerald-400 uppercase block">2. Motion → Kling/Runway</span>
+                            <p class="text-[10px] text-slate-400 font-mono leading-relaxed line-clamp-3">${sb.motionPrompt}</p>
+                            <button onclick="navigator.clipboard.writeText('${sb.motionPrompt.replace(/'/g, "\\'")}')" class="text-[10px] text-indigo-400 hover:underline">Copy</button>
+                        </div>
+                        <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800 space-y-1">
+                            <span class="text-[10px] font-bold text-cyan-400 uppercase block">3. ສຽງພາກ → ElevenLabs</span>
+                            ${voLine ? `<p class="text-[10px] text-slate-300 leading-relaxed">[${voLine.emotion}] ${voLine.text}</p><button onclick="navigator.clipboard.writeText('${voLine.text.replace(/'/g, "\\'")}')" class="text-[10px] text-indigo-400 hover:underline">Copy</button>` : `<p class="text-[10px] text-slate-500 italic">-</p>`}
+                        </div>
+                    </div>
+                </div>
+            `;
+            }).join('');
+
+            const editAudioBox = document.getElementById('editSheetAudioContainer');
+            editAudioBox.innerHTML = (currentProject.audio || []).map(a => `
+                <div class="p-3 bg-slate-900/60 rounded-xl border border-slate-800 flex items-start justify-between gap-2">
+                    <div>
+                        <span class="text-[10px] font-bold text-amber-300 uppercase block mb-0.5">${a.type}</span>
+                        <p class="text-[11px] text-slate-400 leading-relaxed">${a.prompt}</p>
+                    </div>
+                    <button onclick="navigator.clipboard.writeText('${a.prompt.replace(/'/g, "\\'")}')" class="text-[10px] text-indigo-400 hover:underline flex-shrink-0"><i class="ph-bold ph-copy"></i></button>
+                </div>
+            `).join('');
         }
 
         function setGenerating(isGenerating) {
@@ -948,9 +1143,14 @@ async function checkApiStatus(openModalIfMissing) {
             // Guard against an indefinite hang (e.g. server unreachable, or
             // Claude taking unusually long on a big scene count) with a
             // client-side timeout, so the user gets a clear message instead
-            // of a spinner that never resolves.
+            // of a spinner that never resolves. Scaled up for the longer
+            // Duration options (30/60 scenes) — kept a bit above the server's
+            // own per-request Anthropic timeout so the server's error message
+            // (not a generic client abort) is what the user sees if it's
+            // genuinely too slow.
+            const sceneCountForTimeout = getSceneCountClient(duration);
             const controller = new AbortController();
-            const timeoutMs = 4 * 60 * 1000; // 4 minutes
+            const timeoutMs = Math.min(11 * 60 * 1000, 2 * 60 * 1000 + sceneCountForTimeout * 9000);
             const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
             try {
@@ -990,9 +1190,12 @@ async function checkApiStatus(openModalIfMissing) {
                 }
 
                 // Merge Claude's generated package with the locally-known setup fields
+                const usageFromResponse = data._usage;
+                delete data._usage;
                 currentProject = Object.assign({}, data, { genre, format, audience, duration });
                 renderAllTabs();
                 switchTab('tab-story');
+                if (usageFromResponse) renderUsage(usageFromResponse); else fetchUsage();
                 showToast('ສ້າງ Package ໜັງ AI ສຳເລັດແລ້ວ! (Package generated by Claude)');
             } catch (err) {
                 console.error(err);
@@ -1084,6 +1287,40 @@ async function checkApiStatus(openModalIfMissing) {
             a.download = `AI_Movie_Script_${Date.now()}.md`;
             a.click();
             showToast("Export Markdown ສຳເລັດ!");
+        }
+
+        // Exports the scene-by-scene cutting order as a standalone checklist-style
+        // Markdown file — meant to be printed/kept open beside CapCut/Premiere/DaVinci
+        // while assembling the clips you generated from the prompts below, in order.
+        function exportEditSheet() {
+            const vo = currentProject.voiceover || [];
+            let md = `# ${currentProject.title} — ໃບສັ່ງຕັດຕໍ່ (Video Edit Sheet)\n\n`;
+            md += `**Format:** ${currentProject.format} | **Duration:** ${currentProject.duration}\n\n`;
+            md += `> ໃບນີ້ບໍ່ແມ່ນວິດີໂອ — ເປັນລຳດັບ+prompt ໃຫ້ໄປສ້າງຮູບ/ຄລິບ/ສຽງແຍກກັນ ແລ້ວມາຮຽງຕໍ່ກັນຕາມລຳດັບນີ້ໃນໂປຣແກຣມຕັດຕໍ່ຂອງທ່ານ (CapCut / Premiere / DaVinci Resolve).\n\n`;
+            md += `## ຂັ້ນຕອນ\n1. ສ້າງຮູບພາບແຕ່ລະ Scene ດ້ວຍ Image Prompt (Midjourney / Flux)\n2. ສ້າງຄລິບວິດີໂອສັ້ນຈາກຮູບນັ້ນ ດ້ວຍ Motion Prompt (Kling / Runway)\n3. ສ້າງສຽງພາກຈາກຂໍ້ຄວາມ Voiceover ດ້ວຍ ElevenLabs (ຫຼືອື່ນໆ), ລຽງຕາມ Scene\n4. ຮຽງຄລິບທັງໝົດຕໍ່ກັນຕາມລຳດັບ Scene 1, 2, 3, ... ລຸ່ມນີ້\n5. ໃສ່ດົນຕີ+SFX ຕາມທ້າຍໃບນີ້\n\n---\n\n`;
+
+            currentProject.storyboard.forEach((sb, idx) => {
+                const voLine = vo[idx];
+                md += `## Scene ${sb.scene} — ${sb.time}\n`;
+                md += `- [ ] ອະທິບາຍ: ${sb.desc}\n`;
+                md += `- [ ] Image Prompt: \`${sb.imagePrompt}\`\n`;
+                md += `- [ ] Motion Prompt: \`${sb.motionPrompt}\`\n`;
+                if (voLine) md += `- [ ] ສຽງພາກ [${voLine.emotion}]: ${voLine.text}\n`;
+                md += `\n`;
+            });
+
+            md += `---\n\n## ດົນຕີ & SFX (ໃສ່ຕອນສຸດທ້າຍ)\n`;
+            (currentProject.audio || []).forEach(a => {
+                md += `- [ ] **${a.type}**: ${a.prompt}\n`;
+            });
+
+            const blob = new Blob([md], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Edit_Sheet_${Date.now()}.md`;
+            a.click();
+            showToast("Export ໃບສັ່ງຕັດຕໍ່ ສຳເລັດ!");
         }
     </script>
 </body>
