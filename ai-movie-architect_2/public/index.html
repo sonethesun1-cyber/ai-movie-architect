@@ -122,6 +122,10 @@
                     <i class="ph-bold ph-circle text-[8px]"></i>
                     <span id="apiStatusText"></span>
                 </button>
+                <button onclick="openHistoryModal()" class="text-xs px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition flex items-center gap-1.5">
+                    <i class="ph-bold ph-clock-counter-clockwise text-sky-400"></i>
+                    <span>ປະຫວັດ (History)</span>
+                </button>
                 <button onclick="loadSampleProject()" class="text-xs px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition flex items-center gap-1.5">
                     <i class="ph-bold ph-sparkle text-amber-400"></i>
                     <span>ໂຫຼດຕົວຢ່າງ (Sample)</span>
@@ -590,6 +594,33 @@
         </div>
     </div>
 
+    <!-- Generation History Modal -->
+    <div id="historyModal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4" style="background: rgba(2,4,10,0.75); backdrop-filter: blur(4px);">
+        <div class="glass-panel w-full max-w-lg rounded-2xl border border-slate-700 p-6 space-y-4 shadow-2xl max-h-[85vh] flex flex-col">
+            <div class="flex items-center justify-between gap-2.5">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-sky-600 to-indigo-600 flex items-center justify-center flex-shrink-0">
+                        <i class="ph-bold ph-clock-counter-clockwise text-lg text-white"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-slate-100 text-sm">ປະຫວັດການສ້າງ (Generation History)</h3>
+                        <p class="text-xs text-slate-400">ກົດເລືອກອັນໃດອັນໜຶ່ງ ເພື່ອໂຫຼດ Package ນັ້ນຄືນມາທຸກ Tab</p>
+                    </div>
+                </div>
+                <button onclick="closeHistoryModal()" class="text-slate-400 hover:text-slate-200 flex-shrink-0 p-1">
+                    <i class="ph-bold ph-x text-lg"></i>
+                </button>
+            </div>
+            <div id="historyListBox" class="space-y-2 overflow-y-auto flex-grow no-scrollbar" style="min-height:100px;">
+                <p class="text-xs text-slate-500 text-center py-6">ກຳລັງໂຫຼດ...</p>
+            </div>
+            <div class="flex items-center justify-between gap-3 pt-3 border-t border-slate-800">
+                <p class="text-[11px] text-slate-500">ບັນທຶກອັດຕະໂນມັດທຸກຄັ້ງທີ່ Generate, ສູງສຸດ 30 ຄັ້ງລ່າສຸດ — ຢູ່ໃນເຄື່ອງທ່ານເທົ່ານັ້ນ</p>
+                <button onclick="clearAllHistory()" class="text-xs px-3 py-1.5 rounded-lg bg-rose-950/50 hover:bg-rose-900/60 text-rose-300 border border-rose-800/50 transition flex-shrink-0">ລຶບທັງໝົດ</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Project State Data Object (sample data shown until the user generates a real package)
         let currentProject = {
@@ -829,6 +860,122 @@ async function checkApiStatus(openModalIfMissing) {
             const modal = document.getElementById('apiKeyModal');
             modal.classList.add('hidden');
             modal.classList.remove('flex');
+        }
+
+        // Basic HTML-escaping for the bits of history text that come straight
+        // from what the user typed (concept), since it's inserted via innerHTML.
+        function escapeHtml(str) {
+            return String(str == null ? '' : str)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        // ---------------------------------------------------------------------
+        // Generation History — every successful Generate call is saved on the
+        // server (see /api/history*); this lets the user reopen an old package
+        // after closing the app/tab instead of re-generating (and re-paying
+        // for) it.
+        // ---------------------------------------------------------------------
+        function openHistoryModal() {
+            const modal = document.getElementById('historyModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            loadHistoryList();
+        }
+
+        function closeHistoryModal() {
+            const modal = document.getElementById('historyModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        async function loadHistoryList() {
+            const box = document.getElementById('historyListBox');
+            box.innerHTML = '<p class="text-xs text-slate-500 text-center py-6">ກຳລັງໂຫຼດ...</p>';
+            try {
+                const res = await fetch('/api/history');
+                const items = await res.json();
+                if (!res.ok) throw new Error(items.error || 'Could not load history.');
+                if (!items.length) {
+                    box.innerHTML = '<p class="text-xs text-slate-500 text-center py-8">ຍັງບໍ່ມີປະຫວັດການສ້າງ — ກົດ Generate ຄັ້ງທຳອິດ ແລ້ວມັນຈະຂຶ້ນມາທີ່ນີ້ໂດຍອັດຕະໂນມັດ.</p>';
+                    return;
+                }
+                box.innerHTML = items.map(h => {
+                    const d = new Date(h.createdAt);
+                    const dateStr = isNaN(d.getTime()) ? '' : (d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+                    const conceptSnippet = (h.concept || '').slice(0, 90) + ((h.concept || '').length > 90 ? '…' : '');
+                    return `
+                        <div class="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60 hover:border-indigo-500/60 transition flex items-start gap-1 group">
+                            <button onclick="loadHistoryItem('${h.id}')" class="flex-grow text-left min-w-0">
+                                <p class="text-xs font-semibold text-slate-100 mb-0.5 truncate">${escapeHtml(h.title || 'Untitled')}</p>
+                                <p class="text-[11px] text-slate-400 mb-1 line-clamp-2">${escapeHtml(conceptSnippet)}</p>
+                                <p class="text-[10px] text-slate-500">${escapeHtml(dateStr)} · ${escapeHtml(h.genre || '')} · ${escapeHtml(h.duration || '')}</p>
+                            </button>
+                            <button onclick="deleteHistoryItem('${h.id}', event)" class="opacity-0 group-hover:opacity-100 transition text-slate-500 hover:text-rose-400 flex-shrink-0 p-1.5" title="ລຶບອັນນີ້">
+                                <i class="ph-bold ph-trash"></i>
+                            </button>
+                        </div>`;
+                }).join('');
+            } catch (err) {
+                box.innerHTML = '<p class="text-xs text-rose-400 text-center py-6">' + escapeHtml(err.message) + '</p>';
+            }
+        }
+
+        async function loadHistoryItem(id) {
+            try {
+                const res = await fetch('/api/history/' + encodeURIComponent(id));
+                const entry = await res.json();
+                if (!res.ok) throw new Error(entry.error || 'Could not load this generation.');
+
+                // Restore the sidebar form fields too, so they match what produced this package.
+                if (entry.concept != null) document.getElementById('inputConcept').value = entry.concept;
+                if (entry.genre) document.getElementById('inputGenre').value = entry.genre;
+                if (entry.format) document.getElementById('inputFormat').value = entry.format;
+                if (entry.audience) document.getElementById('inputAudience').value = entry.audience;
+                if (entry.duration) {
+                    document.getElementById('inputDuration').value = entry.duration;
+                    updateDurationHint();
+                }
+                document.querySelectorAll('.platform-checkbox').forEach(cb => {
+                    cb.checked = (entry.platforms || []).includes(cb.value);
+                });
+
+                currentProject = Object.assign({}, entry.pkg, {
+                    genre: entry.genre, format: entry.format, audience: entry.audience, duration: entry.duration,
+                });
+                renderAllTabs();
+                switchTab('tab-story');
+                closeHistoryModal();
+                showToast('ໂຫຼດ Package ເກົ່າ "' + (entry.title || '') + '" ສຳເລັດແລ້ວ!');
+            } catch (err) {
+                showToast('ເກີດຂໍ້ຜິດພາດ: ' + err.message, true);
+            }
+        }
+
+        async function deleteHistoryItem(id, event) {
+            if (event) event.stopPropagation();
+            try {
+                const res = await fetch('/api/history/' + encodeURIComponent(id), { method: 'DELETE' });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error(data.error || 'Delete failed.');
+                }
+                loadHistoryList();
+            } catch (err) {
+                showToast('ເກີດຂໍ້ຜິດພາດ: ' + err.message, true);
+            }
+        }
+
+        async function clearAllHistory() {
+            if (!confirm('ລຶບປະຫວັດການສ້າງທັງໝົດບໍ? ບໍ່ສາມາດກູ້ຄືນໄດ້. (Delete all generation history? This cannot be undone.)')) return;
+            try {
+                const res = await fetch('/api/history', { method: 'DELETE' });
+                if (!res.ok) throw new Error('Delete failed.');
+                loadHistoryList();
+                showToast('ລຶບປະຫວັດທັງໝົດແລ້ວ');
+            } catch (err) {
+                showToast('ເກີດຂໍ້ຜິດພາດ: ' + err.message, true);
+            }
         }
 
         async function saveApiKey() {
