@@ -927,11 +927,68 @@ async function checkApiStatus(openModalIfMissing) {
         }
 
         // ---------------------------------------------------------------------
-        // Generation History — every successful Generate call is saved on the
-        // server (see /api/history*); this lets the user reopen an old package
-        // after closing the app/tab instead of re-generating (and re-paying
-        // for) it.
+        // Generation History — stored in THIS BROWSER's own localStorage, not
+        // on the server. It used to be saved server-side only (history.json),
+        // which works fine for local use, but on a host like Render the
+        // server's filesystem is wiped every time the service restarts,
+        // redeploys, or spins back up after being idle — so anything written
+        // to disk there (history, the usage counter) silently disappears the
+        // next time the app is opened, even though nothing was actually
+        // "deleted". localStorage lives in this browser tab's origin instead,
+        // so it survives server restarts. Tradeoff: it's tied to this one
+        // browser/device, not shared across devices — a fair trade for a
+        // single-user tool like this one.
         // ---------------------------------------------------------------------
+        const HISTORY_STORAGE_KEY = 'ai_movie_architect_history_v1';
+        const HISTORY_MAX_ITEMS_CLIENT = 20; // full packages (esp. 60-scene ones) can be sizable, and localStorage quota is small (~5-10MB)
+
+        function loadHistoryArray() {
+            try {
+                const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
+                const arr = raw ? JSON.parse(raw) : [];
+                return Array.isArray(arr) ? arr : [];
+            } catch (e) {
+                console.error('[history] could not read local history:', e);
+                return [];
+            }
+        }
+
+        function saveHistoryArray(arr) {
+            try {
+                localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(arr));
+            } catch (e) {
+                // Most likely the quota was exceeded — a handful of large
+                // 60-scene packages can add up fast. Drop the oldest half and
+                // try once more rather than losing the entry just generated.
+                console.error('[history] save failed, trimming oldest half and retrying:', e);
+                try {
+                    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(arr.slice(0, Math.max(1, Math.floor(arr.length / 2)))));
+                } catch (e2) {
+                    console.error('[history] retry also failed, giving up for now:', e2);
+                }
+            }
+        }
+
+        function makeHistoryId() {
+            if (window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+            return 'h-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+        }
+
+        // Called right after every successful Generate (standard or segment)
+        // so the entry is captured the moment it's created, not fetched back
+        // from a server that might forget it.
+        function addToHistoryLocal({ concept, genre, format, audience, duration, platforms, pkg }) {
+            const arr = loadHistoryArray();
+            arr.unshift({
+                id: makeHistoryId(),
+                createdAt: new Date().toISOString(),
+                title: (pkg && pkg.title) || 'Untitled',
+                concept, genre, format, audience, duration, platforms,
+                pkg,
+            });
+            saveHistoryArray(arr.slice(0, HISTORY_MAX_ITEMS_CLIENT));
+        }
+
         function openHistoryModal() {
             const modal = document.getElementById('historyModal');
             modal.classList.remove('hidden');
@@ -945,43 +1002,35 @@ async function checkApiStatus(openModalIfMissing) {
             modal.classList.remove('flex');
         }
 
-        async function loadHistoryList() {
+        function loadHistoryList() {
             const box = document.getElementById('historyListBox');
-            box.innerHTML = '<p class="text-xs text-slate-500 text-center py-6">ກຳລັງໂຫຼດ...</p>';
-            try {
-                const res = await fetch('/api/history');
-                const items = await res.json();
-                if (!res.ok) throw new Error(items.error || 'Could not load history.');
-                if (!items.length) {
-                    box.innerHTML = '<p class="text-xs text-slate-500 text-center py-8">ຍັງບໍ່ມີປະຫວັດການສ້າງ — ກົດ Generate ຄັ້ງທຳອິດ ແລ້ວມັນຈະຂຶ້ນມາທີ່ນີ້ໂດຍອັດຕະໂນມັດ.</p>';
-                    return;
-                }
-                box.innerHTML = items.map(h => {
-                    const d = new Date(h.createdAt);
-                    const dateStr = isNaN(d.getTime()) ? '' : (d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-                    const conceptSnippet = (h.concept || '').slice(0, 90) + ((h.concept || '').length > 90 ? '…' : '');
-                    return `
-                        <div class="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60 hover:border-indigo-500/60 transition flex items-start gap-1 group">
-                            <button onclick="loadHistoryItem('${h.id}')" class="flex-grow text-left min-w-0">
-                                <p class="text-xs font-semibold text-slate-100 mb-0.5 truncate">${escapeHtml(h.title || 'Untitled')}</p>
-                                <p class="text-[11px] text-slate-400 mb-1 line-clamp-2">${escapeHtml(conceptSnippet)}</p>
-                                <p class="text-[10px] text-slate-500">${escapeHtml(dateStr)} · ${escapeHtml(h.genre || '')} · ${escapeHtml(h.duration || '')}</p>
-                            </button>
-                            <button onclick="deleteHistoryItem('${h.id}', event)" class="opacity-0 group-hover:opacity-100 transition text-slate-500 hover:text-rose-400 flex-shrink-0 p-1.5" title="ລຶບອັນນີ້">
-                                <i class="ph-bold ph-trash"></i>
-                            </button>
-                        </div>`;
-                }).join('');
-            } catch (err) {
-                box.innerHTML = '<p class="text-xs text-rose-400 text-center py-6">' + escapeHtml(err.message) + '</p>';
+            const items = loadHistoryArray();
+            if (!items.length) {
+                box.innerHTML = '<p class="text-xs text-slate-500 text-center py-8">ຍັງບໍ່ມີປະຫວັດການສ້າງ — ກົດ Generate ຄັ້ງທຳອິດ ແລ້ວມັນຈະຂຶ້ນມາທີ່ນີ້ໂດຍອັດຕະໂນມັດ.</p>';
+                return;
             }
+            box.innerHTML = items.map(h => {
+                const d = new Date(h.createdAt);
+                const dateStr = isNaN(d.getTime()) ? '' : (d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+                const conceptSnippet = (h.concept || '').slice(0, 90) + ((h.concept || '').length > 90 ? '…' : '');
+                return `
+                    <div class="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60 hover:border-indigo-500/60 transition flex items-start gap-1 group">
+                        <button onclick="loadHistoryItem('${h.id}')" class="flex-grow text-left min-w-0">
+                            <p class="text-xs font-semibold text-slate-100 mb-0.5 truncate">${escapeHtml(h.title || 'Untitled')}</p>
+                            <p class="text-[11px] text-slate-400 mb-1 line-clamp-2">${escapeHtml(conceptSnippet)}</p>
+                            <p class="text-[10px] text-slate-500">${escapeHtml(dateStr)} · ${escapeHtml(h.genre || '')} · ${escapeHtml(h.duration || '')}</p>
+                        </button>
+                        <button onclick="deleteHistoryItem('${h.id}', event)" class="opacity-0 group-hover:opacity-100 transition text-slate-500 hover:text-rose-400 flex-shrink-0 p-1.5" title="ລຶບອັນນີ້">
+                            <i class="ph-bold ph-trash"></i>
+                        </button>
+                    </div>`;
+            }).join('');
         }
 
-        async function loadHistoryItem(id) {
+        function loadHistoryItem(id) {
             try {
-                const res = await fetch('/api/history/' + encodeURIComponent(id));
-                const entry = await res.json();
-                if (!res.ok) throw new Error(entry.error || 'Could not load this generation.');
+                const entry = loadHistoryArray().find(h => h.id === id);
+                if (!entry) throw new Error('Could not find this generation (it may have been deleted).');
 
                 // Restore the sidebar form fields too, so they match what produced this package.
                 if (entry.concept != null) document.getElementById('inputConcept').value = entry.concept;
@@ -1023,25 +1072,20 @@ async function checkApiStatus(openModalIfMissing) {
             }
         }
 
-        async function deleteHistoryItem(id, event) {
+        function deleteHistoryItem(id, event) {
             if (event) event.stopPropagation();
             try {
-                const res = await fetch('/api/history/' + encodeURIComponent(id), { method: 'DELETE' });
-                if (!res.ok) {
-                    const data = await res.json().catch(() => ({}));
-                    throw new Error(data.error || 'Delete failed.');
-                }
+                saveHistoryArray(loadHistoryArray().filter(h => h.id !== id));
                 loadHistoryList();
             } catch (err) {
                 showToast('ເກີດຂໍ້ຜິດພາດ: ' + err.message, true);
             }
         }
 
-        async function clearAllHistory() {
+        function clearAllHistory() {
             if (!confirm('ລຶບປະຫວັດການສ້າງທັງໝົດບໍ? ບໍ່ສາມາດກູ້ຄືນໄດ້. (Delete all generation history? This cannot be undone.)')) return;
             try {
-                const res = await fetch('/api/history', { method: 'DELETE' });
-                if (!res.ok) throw new Error('Delete failed.');
+                saveHistoryArray([]);
                 loadHistoryList();
                 showToast('ລຶບປະຫວັດທັງໝົດແລ້ວ');
             } catch (err) {
@@ -1523,6 +1567,7 @@ async function checkApiStatus(openModalIfMissing) {
                 data.duration = `ແບ່ງພາກ (${data.completedParts.length}/${SEGMENT_PART_ORDER.length} ພາກ, ${data.storyboard.length} ສາກ)`;
                 currentProject = data;
                 segmentedProject = data;
+                addToHistoryLocal({ concept, genre, format, audience, duration: data.duration, platforms, pkg: data });
                 renderAllTabs();
                 switchTab('tab-story');
                 renderSegmentPartButtons();
@@ -1617,6 +1662,7 @@ async function checkApiStatus(openModalIfMissing) {
                 const usageFromResponse = data._usage;
                 delete data._usage;
                 currentProject = Object.assign({}, data, { genre, format, audience, duration });
+                addToHistoryLocal({ concept, genre, format, audience, duration, platforms, pkg: currentProject });
                 renderAllTabs();
                 switchTab('tab-story');
                 if (usageFromResponse) renderUsage(usageFromResponse); else fetchUsage();
