@@ -224,7 +224,7 @@
                             <label class="block text-xs font-medium text-slate-300 mb-1">ກຸ່ມເປົ້າໝາຍ (Audience)</label>
                             <input type="text" id="inputAudience" class="w-full glass-input rounded-xl p-2.5 text-xs" value="ເດັກນ້ອຍ ແລະ ຄອບຄົວ (All Ages)">
                         </div>
-                        <div>
+                        <div id="durationFieldWrap">
                             <label class="block text-xs font-medium text-slate-300 mb-1">ຄວາມຍາວ (Duration)</label>
                             <select id="inputDuration" class="w-full glass-input rounded-xl p-2.5 text-xs" onchange="updateDurationHint()">
                                 <option value="1 Minute (6 Scenes)">1 ນາທີ (6 ສາກ)</option>
@@ -236,6 +236,24 @@
                         </div>
                     </div>
                     <p id="durationHint" class="text-[10px] text-slate-500 -mt-1.5"></p>
+
+                    <div>
+                        <label class="block text-xs font-medium text-slate-300 mb-1">ຮູບແບບການສ້າງ (Generation Mode)</label>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button type="button" onclick="setGenerationMode('standard')" id="modeBtnStandard" class="text-xs py-2 rounded-lg border border-indigo-500 bg-indigo-600 text-white transition">ມາດຕະຖານ (Standard)</button>
+                            <button type="button" onclick="setGenerationMode('segmented')" id="modeBtnSegmented" class="text-xs py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-indigo-500/60 transition">ແບ່ງພາກ (Segmented)</button>
+                        </div>
+                        <p class="text-[10px] text-slate-500 mt-1">ແບ່ງພາກ: ສ້າງທີລະ 20 ສາກ (ຕົ້ນ/ກາງ/ທ້າຍເລື່ອງ) — ເລືອກລຳດັບເອງໄດ້, ໄວ ແລະ ໜ້າເຊື່ອຖືກວ່າສຳລັບເລື່ອງຍາວ 10 ນາທີ.</p>
+                    </div>
+
+                    <div id="segmentedControls" class="hidden space-y-2.5 p-3 rounded-xl bg-slate-800/40 border border-slate-700/60">
+                        <div class="flex items-center justify-between">
+                            <label class="text-xs font-medium text-slate-300">ພາກທີ່ຈະສ້າງ (Which part)</label>
+                            <button type="button" onclick="resetSegmentedProject()" class="text-[10px] text-rose-400 hover:underline">ເລີ່ມໂຄງການໃໝ່</button>
+                        </div>
+                        <div class="grid grid-cols-3 gap-1.5" id="segmentPartButtons"></div>
+                        <p id="segmentProgressText" class="text-[10px] text-slate-500"></p>
+                    </div>
 
                     <div>
                         <label class="block text-xs font-medium text-slate-300 mb-1">ອອນໄລນ໌ / ແພລັດຟອມ (Target Platform)</label>
@@ -255,7 +273,7 @@
                         </div>
                     </div>
 
-                    <button onclick="generateMoviePackage()" id="btnGenerate" class="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold text-xs shadow-lg shadow-indigo-600/30 transition transform active:scale-95 flex items-center justify-center gap-2">
+                    <button onclick="handleGenerateClick()" id="btnGenerate" class="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold text-xs shadow-lg shadow-indigo-600/30 transition transform active:scale-95 flex items-center justify-center gap-2">
                         <i class="ph-bold ph-magic-wand text-lg" id="btnGenerateIcon"></i>
                         <span id="btnGenerateLabel">ປະມວນຜົນສ້າງ Package ໜັງ AI (Generate with Claude)</span>
                     </button>
@@ -623,6 +641,42 @@
 
     <script>
         // Project State Data Object (sample data shown until the user generates a real package)
+        // --- Segmented ("by parts") generation state -----------------------
+        // A long movie can be built as 3 independently-generated parts of 20
+        // scenes each instead of one big call. `currentProject` still drives
+        // every tab's rendering either way; these two extra variables just
+        // remember the last project seen in each mode so switching the
+        // toggle back and forth doesn't lose either one.
+        const SEGMENT_PART_ORDER = ['beginning', 'middle', 'end'];
+        const SEGMENT_PART_LABELS = { beginning: 'ຕົ້ນເລື່ອງ (Beginning)', middle: 'ກາງເລື່ອງ (Middle)', end: 'ທ້າຍເລື່ອງ (End)' };
+        const SEGMENT_PART_SHORT = { beginning: 'ຕົ້ນ', middle: 'ກາງ', end: 'ທ້າຍ' };
+        const SEGMENT_SCENES_PER_PART_CLIENT = 20; // mirrors SEGMENT_SCENES_PER_PART in server.js
+        let generationMode = 'standard'; // 'standard' | 'segmented'
+        let selectedSegmentPart = 'beginning';
+        let standardProject = null;
+        let segmentedProject = null;
+
+        // A project "is segmented" purely by having a completedParts array —
+        // set by the server's /api/generate-segment response (even an empty
+        // array, for a freshly-started segmented project) — never a
+        // separately-tracked flag that could drift out of sync with the data.
+        function isSegmentedProject(p) {
+            return Boolean(p && Array.isArray(p.completedParts));
+        }
+
+        function makeEmptySegmentedShell() {
+            return {
+                completedParts: [], segmentScenesPerPart: SEGMENT_SCENES_PER_PART_CLIENT,
+                title: '', logline: '', theme: '', artStyle: '', act1: '', act2: '', act3: '',
+                genre: document.getElementById('inputGenre').value,
+                format: document.getElementById('inputFormat').value,
+                audience: document.getElementById('inputAudience').value,
+                duration: 'ແບ່ງພາກ (0/3 ພາກ)',
+                characters: [], locations: [], storyboard: [], voiceover: [], posters: [],
+                social: { titles: [], description: '', hashtags: '', keywords: '' }, audio: [],
+            };
+        }
+
         let currentProject = {
             title: "ຕຳນານຫຸ່ນພົນອໍໂຕ້ໃນປ່າບູຮານ (The Ancient Solar Automation)",
             genre: "3D Pixar Animation",
@@ -754,6 +808,8 @@
             checkApiStatus(true); // auto-open the key setup modal on first run if no key is saved yet
             fetchUsage();
             updateDurationHint();
+            standardProject = currentProject; // the built-in sample, so switching modes and back restores it
+            updateGenerateButtonLabel();
         };
 
         // Mirrors the server's getSceneCount() parsing so the client can size its
@@ -932,10 +988,6 @@ async function checkApiStatus(openModalIfMissing) {
                 if (entry.genre) document.getElementById('inputGenre').value = entry.genre;
                 if (entry.format) document.getElementById('inputFormat').value = entry.format;
                 if (entry.audience) document.getElementById('inputAudience').value = entry.audience;
-                if (entry.duration) {
-                    document.getElementById('inputDuration').value = entry.duration;
-                    updateDurationHint();
-                }
                 document.querySelectorAll('.platform-checkbox').forEach(cb => {
                     cb.checked = (entry.platforms || []).includes(cb.value);
                 });
@@ -943,6 +995,25 @@ async function checkApiStatus(openModalIfMissing) {
                 currentProject = Object.assign({}, entry.pkg, {
                     genre: entry.genre, format: entry.format, audience: entry.audience, duration: entry.duration,
                 });
+
+                // A segmented entry (has a completedParts array) needs the
+                // segmented mode UI switched on; a standard one needs the
+                // Duration <select> restored to match instead.
+                if (isSegmentedProject(currentProject)) {
+                    generationMode = 'segmented';
+                    segmentedProject = currentProject;
+                    applyModeVisuals('segmented');
+                    renderSegmentPartButtons();
+                } else {
+                    generationMode = 'standard';
+                    standardProject = currentProject;
+                    applyModeVisuals('standard');
+                    if (entry.duration) {
+                        document.getElementById('inputDuration').value = entry.duration;
+                        updateDurationHint();
+                    }
+                }
+
                 renderAllTabs();
                 switchTab('tab-story');
                 closeHistoryModal();
@@ -1262,10 +1333,184 @@ async function checkApiStatus(openModalIfMissing) {
             btn.disabled = isGenerating;
             if (isGenerating) {
                 icon.className = 'ph-bold ph-circle-notch text-lg spin';
-                label.innerText = 'Claude ກຳລັງສ້າງ Package ໜັງ... (Generating...)';
+                label.innerText = 'Claude ກຳລັງສ້າງ... (Generating...)';
             } else {
                 icon.className = 'ph-bold ph-magic-wand text-lg';
-                label.innerText = 'ປະມວນຜົນສ້າງ Package ໜັງ AI (Generate with Claude)';
+                updateGenerateButtonLabel(); // restores the mode-appropriate label (standard vs. "generate this part")
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // Segmented ("by parts") generation — mode toggle, part picker, and the
+        // segment-specific generate call. See the SEGMENT_* constants above and
+        // the /api/generate-segment comment block in server.js for the design.
+        // ---------------------------------------------------------------------
+        function updateGenerateButtonLabel() {
+            const label = document.getElementById('btnGenerateLabel');
+            if (!label) return;
+            label.innerText = generationMode === 'segmented'
+                ? `ສ້າງພາກ: ${SEGMENT_PART_LABELS[selectedSegmentPart]}`
+                : 'ປະມວນຜົນສ້າງ Package ໜັງ AI (Generate with Claude)';
+        }
+
+        function handleGenerateClick() {
+            if (generationMode === 'segmented') {
+                generateSegment();
+            } else {
+                generateMoviePackage();
+            }
+        }
+
+        function applyModeVisuals(mode) {
+            const activeCls = 'text-xs py-2 rounded-lg border border-indigo-500 bg-indigo-600 text-white transition';
+            const inactiveCls = 'text-xs py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-indigo-500/60 transition';
+            document.getElementById('modeBtnStandard').className = mode === 'standard' ? activeCls : inactiveCls;
+            document.getElementById('modeBtnSegmented').className = mode === 'segmented' ? activeCls : inactiveCls;
+            document.getElementById('durationFieldWrap').classList.toggle('hidden', mode === 'segmented');
+            document.getElementById('durationHint').classList.toggle('hidden', mode === 'segmented');
+            document.getElementById('segmentedControls').classList.toggle('hidden', mode !== 'segmented');
+            updateGenerateButtonLabel();
+        }
+
+        function setGenerationMode(mode) {
+            if (mode === generationMode) { applyModeVisuals(mode); return; }
+            // Stash whichever project is currently loaded under the mode it
+            // actually belongs to, so switching back restores it.
+            if (isSegmentedProject(currentProject)) segmentedProject = currentProject; else standardProject = currentProject;
+
+            generationMode = mode;
+            if (mode === 'segmented') {
+                currentProject = segmentedProject || makeEmptySegmentedShell();
+                renderSegmentPartButtons();
+            } else {
+                currentProject = standardProject || currentProject;
+                updateDurationHint();
+            }
+            applyModeVisuals(mode);
+            renderAllTabs();
+        }
+
+        function renderSegmentPartButtons() {
+            const box = document.getElementById('segmentPartButtons');
+            const progressText = document.getElementById('segmentProgressText');
+            if (!box || !progressText) return;
+            const completed = (currentProject.completedParts) || [];
+            box.innerHTML = SEGMENT_PART_ORDER.map(p => {
+                const done = completed.includes(p);
+                const active = selectedSegmentPart === p;
+                return `<button type="button" onclick="selectSegmentPart('${p}')" class="text-[11px] py-2 px-1 rounded-lg border transition ${active ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:border-indigo-500/60'}">
+                    ${done ? '✅' : '⬜'} ${SEGMENT_PART_SHORT[p]}
+                </button>`;
+            }).join('');
+            const totalScenes = (currentProject.storyboard || []).length;
+            const totalMax = SEGMENT_SCENES_PER_PART_CLIENT * SEGMENT_PART_ORDER.length;
+            progressText.innerText = `${completed.length}/${SEGMENT_PART_ORDER.length} ພາກສ້າງແລ້ວ (${totalScenes}/${totalMax} ສາກ, ~${(totalScenes * 10 / 60).toFixed(1)} ນາທີ)`;
+            updateGenerateButtonLabel();
+        }
+
+        function selectSegmentPart(part) {
+            selectedSegmentPart = part;
+            renderSegmentPartButtons();
+        }
+
+        function resetSegmentedProject() {
+            if (!confirm('ເລີ່ມໂຄງການແບ່ງພາກໃໝ່ບໍ? ໂຄງການປັດຈຸບັນຈະຫາຍໄປຈາກໜ້າຈໍ (ແຕ່ຍັງເບິ່ງຄືນໄດ້ພາຍຫຼັງຈາກ "ປະຫວັດ (History)").')) return;
+            segmentedProject = null;
+            currentProject = makeEmptySegmentedShell();
+            selectedSegmentPart = 'beginning';
+            renderAllTabs();
+            renderSegmentPartButtons();
+            showToast('ເລີ່ມໂຄງການແບ່ງພາກໃໝ່ແລ້ວ');
+        }
+
+        async function generateSegment() {
+            const concept = document.getElementById('inputConcept').value.trim();
+            const genre = document.getElementById('inputGenre').value;
+            const format = document.getElementById('inputFormat').value;
+            const audience = document.getElementById('inputAudience').value;
+            const platforms = Array.from(document.querySelectorAll('.platform-checkbox:checked')).map(cb => cb.value);
+            const part = selectedSegmentPart;
+            const partLabel = SEGMENT_PART_LABELS[part];
+            const errorBox = document.getElementById('generateError');
+            errorBox.classList.add('hidden');
+
+            if (!concept) {
+                errorBox.innerText = 'ກະລຸນາປ້ອນໄອເດຍໜັງກ່ອນ (Please enter a story concept first).';
+                errorBox.classList.remove('hidden');
+                return;
+            }
+
+            if ((currentProject.completedParts || []).includes(part)) {
+                if (!confirm(`ພາກ "${partLabel}" ສ້າງແລ້ວ, ຕ້ອງການສ້າງໃໝ່ (ຂຽນທັບອັນເກົ່າ) ບໍ?`)) return;
+            }
+
+            setGenerating(true);
+
+            // Each part is fixed at SEGMENT_SCENES_PER_PART_CLIENT scenes, so
+            // this timeout doesn't need to scale with a user choice like the
+            // standard flow's does — just kept comfortably above the server's
+            // own per-part timeout (see requestTimeoutMs in /api/generate-segment).
+            const controller = new AbortController();
+            const backendTimeoutMs = Math.min(6 * 60 * 1000, 90 * 1000 + SEGMENT_SCENES_PER_PART_CLIENT * 8000);
+            const timeoutMs = Math.min(8 * 60 * 1000, backendTimeoutMs + 90 * 1000);
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+            try {
+                let res;
+                try {
+                    res = await fetch('/api/generate-segment', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            concept, genre, format, audience, platforms, part,
+                            existingProject: (isSegmentedProject(currentProject) && currentProject.completedParts.length) ? currentProject : null,
+                        }),
+                        signal: controller.signal
+                    });
+                } catch (networkErr) {
+                    if (networkErr.name === 'AbortError') {
+                        throw new Error('ໝົດເວລາ (timed out) waiting for Claude after ' + (timeoutMs / 1000) + 's. The server may be unreachable — check the terminal/console window that opened when you launched the app.');
+                    }
+                    throw new Error('Could not reach the AI Movie Architect server (network error: ' + networkErr.message + '). Make sure the app is still running (the terminal/console window it opened), then reload this page.');
+                }
+
+                let data;
+                try {
+                    data = await res.json();
+                } catch (parseErr) {
+                    throw new Error('Server returned an unreadable response (HTTP ' + res.status + '). Check the terminal/console window the app opened for the full error.');
+                }
+
+                if (res.status === 401 && data.loginRequired) {
+                    window.location.href = '/login';
+                    return;
+                }
+
+                if (!res.ok) {
+                    throw new Error(data.error || 'Generation failed (HTTP ' + res.status + ')');
+                }
+
+                const usageFromResponse = data._usage;
+                delete data._usage;
+                data.genre = genre;
+                data.format = format;
+                data.audience = audience;
+                data.duration = `ແບ່ງພາກ (${data.completedParts.length}/${SEGMENT_PART_ORDER.length} ພາກ, ${data.storyboard.length} ສາກ)`;
+                currentProject = data;
+                segmentedProject = data;
+                renderAllTabs();
+                switchTab('tab-story');
+                renderSegmentPartButtons();
+                if (usageFromResponse) renderUsage(usageFromResponse); else fetchUsage();
+                showToast(`ສ້າງ "${partLabel}" ສຳເລັດແລ້ວ! (${data.completedParts.length}/${SEGMENT_PART_ORDER.length} ພາກ)`);
+            } catch (err) {
+                console.error(err);
+                errorBox.innerText = err.message;
+                errorBox.classList.remove('hidden');
+                showToast('ເກີດຂໍ້ຜິດພາດ: ' + err.message, true);
+            } finally {
+                clearTimeout(timeoutId);
+                setGenerating(false);
             }
         }
 
@@ -1356,12 +1601,17 @@ async function checkApiStatus(openModalIfMissing) {
         }
 
         function loadSampleProject() {
+            if (generationMode !== 'standard') setGenerationMode('standard');
             document.getElementById('inputConcept').value = "ເດັກນ້ອຍລາວຜູ້ໜຶ່ງຄົ້ນພົບຫຸ່ນພົນອໍໂຕ້ໃນປ່າບູຮານ ເຊິ່ງສາມາດປ່ຽນພະລັງງານແສງອາທິດມາເປັນເຄື່ອງປູກຜັກອັດໂຕໂນມັດ...";
             renderAllTabs();
             showToast("ໂຫຼດ Project ຕົວຢ່າງສຳເລັດ!");
         }
 
         function addNewScene() {
+            if (isSegmentedProject(currentProject)) {
+                showToast('ໂຄງການແບ່ງພາກ: ໃຫ້ເພີ່ມ Scene ໂດຍການສ້າງ/ສ້າງໃໝ່ພາກທັງໝົດແທນ (ດ້ານຊ້າຍ), ບໍ່ໃຫ້ເພີ່ມທີລະ Scene ບ່ອນນີ້ — ບໍ່ດັ່ງນັ້ນເລກ Scene ຈະສັບສົນ.', true);
+                return;
+            }
             const newNum = currentProject.storyboard.length + 1;
             currentProject.storyboard.push({
                 scene: newNum,
@@ -1375,6 +1625,10 @@ async function checkApiStatus(openModalIfMissing) {
         }
 
         function removeScene(index) {
+            if (isSegmentedProject(currentProject)) {
+                showToast('ໂຄງການແບ່ງພາກ: ໃຫ້ລົບ Scene ໂດຍການສ້າງພາກນັ້ນໃໝ່ແທນ (ດ້ານຊ້າຍ), ບໍ່ໃຫ້ລົບທີລະ Scene ບ່ອນນີ້ — ບໍ່ດັ່ງນັ້ນເລກ Scene ຈະສັບສົນ.', true);
+                return;
+            }
             currentProject.storyboard.splice(index, 1);
             // Re-index scene numbers
             currentProject.storyboard.forEach((sb, i) => sb.scene = i + 1);
