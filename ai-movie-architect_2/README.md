@@ -40,7 +40,7 @@ The header shows a small badge — green ("Claude API: Ready") once a key is set
 ## Using it
 
 1. Type your story concept (Lao or English) in the sidebar, pick genre, aspect ratio, audience, duration, and target platforms.
-2. Click **"ປະມວນຜົນສ້າງ Package ໜັງ AI (Generate with Claude)."** The button shows a spinner while Claude writes the full package: roughly 15–40 seconds for 1–3 minutes (6–18 scenes), and up to a few minutes for the longer 5/10-minute options (30/60 scenes) — the longer options also cost proportionally more per generation (see the usage banner).
+2. Click **"ປະມວນຜົນສ້າງ Package ໜັງ AI (Generate with Claude)."** The button shows a spinner while Claude writes the full package: roughly 15–40 seconds for 1–3 minutes (6–18 scenes), and up to several minutes for the longer 5/10-minute options (30/60 scenes) — the longer options also cost proportionally more per generation (see the usage banner). For 5/10 minutes, "ແບ່ງພາກ (Segmented)" mode below is the more reliable choice.
 3. Browse all 9 tabs — story, voiceover, characters, storyboard, locations, posters, social, audio, and the edit sheet. Every prompt field has a one-click Copy button.
 4. Use **Export JSON** or **Export MD** in the header to download the whole package for pasting into Midjourney, Flux, Google Flow, Kling, Runway, Suno, Udio, or ElevenLabs.
 5. **"ໂຫຼດຕົວຢ່າງ (Sample)"** just refills the concept box with the demo example and re-renders the built-in sample package — it doesn't call the API, so it's free to click around with.
@@ -100,6 +100,21 @@ Notes specific to the hosted version:
 A 9th tab, "ໃບສັ່ງຕັດຕໍ່ (Edit Sheet)", turns the generated storyboard into a scene-by-scene cutting order for you to follow in CapCut, Premiere, DaVinci Resolve, or any other video editor. For each scene it shows, side by side, the image prompt (for Midjourney/Flux), the motion prompt (for Kling/Runway), and the matching voiceover line (for ElevenLabs or similar) — in the exact order the final video should be assembled — followed by the music/SFX prompts to add last. An "Export ໃບຕັດຕໍ່ (.md)" button downloads the same thing as a checklist-style Markdown file you can keep open while you edit.
 
 This is a cutting *order sheet*, not automatic video editing — the app only ever produces text prompts (see "Notes & limits" below); you still generate each image/clip/voice line yourself in the tools above and assemble them in your editor by following this order.
+
+## Segmented generation (ແບ່ງພາກ) — for longer, more reliable movies
+
+The sidebar has a **"ຮູບແບບການສ້າງ (Generation Mode)"** toggle: **ມາດຕະຖານ (Standard)** is the original one-call flow above; **ແບ່ງພາກ (Segmented)** builds a 10-minute, 60-scene movie as 3 separate parts of 20 scenes each — Beginning, Middle, End — generated one at a time instead of in one giant call.
+
+Why: a single 30/60-scene generation asks Claude to write thousands of words of structured JSON in one response, which can take several minutes and occasionally run past the app's own timeout (you'd see a "timed out" error and nothing generated). Three 20-scene calls are each much smaller and faster, so they're far less likely to time out, and a failed part only costs you that one part instead of the whole movie.
+
+How it works:
+1. Switch to **ແບ່ງພາກ (Segmented)** — the Duration dropdown is replaced by a **"ພາກທີ່ຈະສ້າງ (Which part)"** picker with three buttons: ຕົ້ນ (Beginning), ກາງ (Middle), ທ້າຍ (End).
+2. Pick any one of the three and click Generate — **you can start with any part, in any order**, not just the beginning. Whichever part you generate first invents the whole movie's title, characters, art style, and all three act summaries (its "story bible"), even though it only writes detailed scenes for that one part — the other two parts are written later straight from those act summaries, so they stay consistent no matter what order you build them in.
+3. Generate the other two parts whenever you like (✅ marks a part as done). Each one automatically reuses the established title/characters/art style — same character anchor prompts word-for-word — so the finished movie looks and sounds consistent across all 60 scenes.
+4. Once all 3 parts are done, every tab (storyboard, voiceover, Edit Sheet, exports) works exactly like a standard 60-scene package — nothing else changes.
+5. Regenerating an already-done part overwrites just that part's 20 scenes (after a confirmation), leaving the others untouched. **"ເລີ່ມໂຄງການໃໝ່"** clears the whole segmented project to start over (the old one is still in History if you want it back).
+
+Like standard generations, every part you generate is saved automatically to History as a complete, playable-so-far package.
 
 ## Usage / cost tracker
 

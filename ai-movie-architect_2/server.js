@@ -270,6 +270,34 @@ function formatTimeRange(startSeconds, endSeconds) {
 }
 
 // ---------------------------------------------------------------------------
+// Segmented ("by parts") generation. Instead of asking Claude to write an
+// entire long movie in one call — which is exactly what made the 30/60-scene
+// options slow and prone to timing out — a long movie can be built as 3
+// separate, independently-generated parts of 20 scenes each (Beginning,
+// Middle, End; 60 scenes / 10 minutes total, same ceiling as the biggest
+// Duration option). Each part is a small, fast, reliable call. The creator
+// can generate them in ANY order because each part is written against a
+// shared "story bible" (title/theme/art style/character anchors/act
+// summaries) rather than against the other parts' actual scene content: the
+// first part generated (whichever one it is) invents the bible — including
+// all three act summaries, which act as a roadmap for the other two parts —
+// and every part after that reuses it untouched for consistency.
+// ---------------------------------------------------------------------------
+const SEGMENT_SCENES_PER_PART = 20;
+const PART_CONFIG = {
+  beginning: { index: 0, labelLao: 'ຕົ້ນເລື່ອງ', labelEn: 'Beginning' },
+  middle: { index: 1, labelLao: 'ກາງເລື່ອງ', labelEn: 'Middle' },
+  end: { index: 2, labelLao: 'ທ້າຍເລື່ອງ', labelEn: 'End' },
+};
+
+function getPartSceneRange(part) {
+  const cfg = PART_CONFIG[part];
+  const start = cfg.index * SEGMENT_SCENES_PER_PART + 1;
+  const end = start + SEGMENT_SCENES_PER_PART - 1;
+  return { start, end };
+}
+
+// ---------------------------------------------------------------------------
 // Tool schema Claude must fill in — this is what guarantees structured,
 // render-ready JSON instead of free-form prose we'd have to parse ourselves.
 // ---------------------------------------------------------------------------
@@ -445,6 +473,212 @@ Requirements:
 Call the submit_movie_package tool now with the complete package.`;
 }
 
+// Extra system-prompt paragraph specific to segmented ("by parts") generation
+// — appended to the same SYSTEM_PROMPT above so the language/consistency
+// rules stay identical between the two endpoints.
+const SEGMENTED_SYSTEM_ADDENDUM = `
+
+You are generating ONE PART of a longer movie that is split into 3 parts of ${SEGMENT_SCENES_PER_PART} scenes each (Beginning, Middle, End — ${SEGMENT_SCENES_PER_PART * 3} scenes / ${(SEGMENT_SCENES_PER_PART * 3 * 10) / 60} minutes total). The creator may generate these parts in any order, one at a time. When no existing story bible is given in the user message, invent one that spans the FULL movie — title, logline, theme, art style, and all three act summaries (act1 = Beginning, act2 = Middle, act3 = End) — even though you are only writing detailed scene-by-scene content for one part right now; the other two parts will be generated later purely from your act summaries, so make sure each act summary alone is enough to write that part from. When an existing story bible IS given, you MUST reuse it exactly as given — same title, theme, art style, and, critically, the exact same character names and anchor prompts word-for-word wherever they appear — and write only this part's ${SEGMENT_SCENES_PER_PART} scenes, consistent with the given act summary for this part.`;
+
+function buildSegmentToolDefinition({ includeStoryBible }) {
+  const sharedProps = {
+    characters: {
+      type: 'array',
+      description: includeStoryBible
+        ? '2 to 4 main characters for the whole movie.'
+        : "The existing characters, reused with the exact same name and anchor text; add a new one only if this part genuinely introduces one the creator hasn't met yet.",
+      minItems: 2,
+      maxItems: 6,
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Character name in Lao with English transliteration in parentheses.' },
+          age: { type: 'string', description: 'Age, in Lao (e.g. "10 ປີ").' },
+          role: { type: 'string', description: 'Role in the story, in Lao.' },
+          visual: { type: 'string', description: 'Detailed visual description (face, hair, eyes, body, outfit) in Lao.' },
+          anchor: { type: 'string', description: 'Standardized ENGLISH character-anchor prompt string, richly descriptive, ending with an --ar aspect ratio tag.' },
+        },
+        required: ['name', 'age', 'role', 'visual', 'anchor'],
+      },
+    },
+    locations: {
+      type: 'array',
+      description: includeStoryBible
+        ? '2 to 4 main settings/environments for the whole movie.'
+        : 'The existing locations, reused if this part is set there; add a new one only if this part needs a setting that does not exist yet.',
+      minItems: 2,
+      maxItems: 6,
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Location name in Lao with English translation in parentheses.' },
+          desc: { type: 'string', description: 'Short description in Lao.' },
+          prompt: { type: 'string', description: 'ENGLISH environment-only background prompt (no characters), ending with an --ar aspect ratio tag.' },
+        },
+        required: ['name', 'desc', 'prompt'],
+      },
+    },
+    storyboard: {
+      type: 'array',
+      description: `Exactly ${SEGMENT_SCENES_PER_PART} scenes for THIS PART ONLY, numbered 1-${SEGMENT_SCENES_PER_PART} relative to the start of this part (the app repositions them to their true place in the full movie automatically — don't worry about the movie's overall scene numbers).`,
+      minItems: SEGMENT_SCENES_PER_PART,
+      maxItems: SEGMENT_SCENES_PER_PART,
+      items: {
+        type: 'object',
+        properties: {
+          scene: { type: 'integer', description: 'Scene number within this part, starting at 1.' },
+          time: { type: 'string', description: 'Timecode range within this part, like "00:00 - 00:10".' },
+          desc: { type: 'string', description: 'Short scene description in Lao.' },
+          imagePrompt: { type: 'string', description: 'ENGLISH text-to-image prompt optimized for Midjourney/Flux/Google Flow, incorporating the relevant character anchor(s) word-for-word, ending with an --ar aspect ratio tag.' },
+          motionPrompt: { type: 'string', description: 'ENGLISH image-to-video camera motion prompt for Kling/Runway/Google Flow (camera movement only).' },
+        },
+        required: ['scene', 'time', 'desc', 'imagePrompt', 'motionPrompt'],
+      },
+    },
+    voiceover: {
+      type: 'array',
+      description: `Exactly ${SEGMENT_SCENES_PER_PART} narration segments for THIS PART ONLY, one per scene, in order.`,
+      minItems: SEGMENT_SCENES_PER_PART,
+      maxItems: SEGMENT_SCENES_PER_PART,
+      items: {
+        type: 'object',
+        properties: {
+          time: { type: 'string', description: 'Timecode range within this part, like "00:00 - 00:10".' },
+          emotion: { type: 'string', description: 'Emotional tone tag in Lao, e.g. "ຕື່ນເຕັ້ນ".' },
+          text: { type: 'string', description: 'Natural, modern spoken Lao narration for this segment.' },
+        },
+        required: ['time', 'emotion', 'text'],
+      },
+    },
+  };
+
+  if (!includeStoryBible) {
+    return {
+      name: 'submit_movie_segment',
+      description: 'Submit this one part (scene range) of a longer AI movie, reusing the existing story bible exactly.',
+      input_schema: {
+        type: 'object',
+        properties: sharedProps,
+        required: ['characters', 'locations', 'storyboard', 'voiceover'],
+      },
+    };
+  }
+
+  return {
+    name: 'submit_movie_segment',
+    description: "Submit the complete story bible for a longer AI movie, plus this part's detailed scenes.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Movie title, Lao with an English translation in parentheses.' },
+        logline: { type: 'string', description: '1-2 sentence Lao-language logline for the WHOLE movie.' },
+        theme: { type: 'string', description: 'Emotional theme / tone, in Lao.' },
+        artStyle: { type: 'string', description: 'Short English description of the overall visual art style (for consistent image generation).' },
+        act1: { type: 'string', description: 'Act 1 (Beginning) summary, in Lao — covers the whole planned movie, not just this part.' },
+        act2: { type: 'string', description: 'Act 2 (Middle) summary, in Lao.' },
+        act3: { type: 'string', description: 'Act 3 (End) summary, in Lao.' },
+        posters: {
+          type: 'array',
+          description: 'Exactly 3 distinct movie poster/thumbnail concepts for the whole movie.',
+          minItems: 3,
+          maxItems: 3,
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: 'Concept label, e.g. "Poster Concept 1: Vertical TikTok/Shorts (9:16)".' },
+              prompt: { type: 'string', description: 'ENGLISH text-to-image prompt for generating the poster art, ending with an --ar aspect ratio tag.' },
+              textOverlay: { type: 'string', description: 'Text overlay recommendation, Lao title with English where relevant.' },
+            },
+            required: ['title', 'prompt', 'textOverlay'],
+          },
+        },
+        social: {
+          type: 'object',
+          description: 'Social media & upload package for the whole movie.',
+          properties: {
+            titles: { type: 'array', description: 'Exactly 3 click-worthy title options.', minItems: 3, maxItems: 3, items: { type: 'string' } },
+            description: { type: 'string', description: 'Engaging Lao video description including a timestamp/chapter list.' },
+            hashtags: { type: 'string', description: 'Space-separated hashtags.' },
+            keywords: { type: 'string', description: 'Comma-separated SEO keywords.' },
+          },
+          required: ['titles', 'description', 'hashtags', 'keywords'],
+        },
+        audio: {
+          type: 'array',
+          description: 'At least one background music prompt (Suno/Udio) and one time-coded SFX list, for the whole movie.',
+          minItems: 2,
+          items: {
+            type: 'object',
+            properties: {
+              type: { type: 'string', description: 'e.g. "Background Music (Suno / Udio Prompt)" or "Sound Effects (SFX List)".' },
+              prompt: { type: 'string', description: 'ENGLISH prompt text.' },
+            },
+            required: ['type', 'prompt'],
+          },
+        },
+        ...sharedProps,
+      },
+      required: ['title', 'logline', 'theme', 'artStyle', 'act1', 'act2', 'act3', 'posters', 'social', 'audio', 'characters', 'locations', 'storyboard', 'voiceover'],
+    },
+  };
+}
+
+function buildSegmentUserPrompt({ concept, genre, format, audience, platforms, part, storyBible }) {
+  const aspectRatio = getAspectRatio(format);
+  const platformList = (platforms && platforms.length ? platforms : ['TikTok', 'YouTube']).join(', ');
+  const cfg = PART_CONFIG[part];
+  const totalScenes = SEGMENT_SCENES_PER_PART * 3;
+  const totalMinutes = (totalScenes * 10) / 60;
+  const range = getPartSceneRange(part);
+
+  let prompt = `Generate one part of a longer AI movie production package for the following brief:
+
+- Story concept (from the creator, may be Lao or English): "${concept}"
+- Genre / visual style: ${genre}
+- Aspect ratio / target format: ${format} (use the tag "--ar ${aspectRatio}" at the end of every image-generation prompt)
+- Target audience: ${audience}
+- Target platforms: ${platformList}
+- Total planned movie: ${totalScenes} scenes of 10 seconds each (${totalMinutes} minutes), split into 3 parts of ${SEGMENT_SCENES_PER_PART} scenes: Beginning (scenes 1-${SEGMENT_SCENES_PER_PART}), Middle (${SEGMENT_SCENES_PER_PART + 1}-${SEGMENT_SCENES_PER_PART * 2}), End (${SEGMENT_SCENES_PER_PART * 2 + 1}-${totalScenes}).
+- You are writing NOW: the ${cfg.labelEn.toUpperCase()} part only (the movie's overall scenes ${range.start}-${range.end}) — write exactly ${SEGMENT_SCENES_PER_PART} storyboard scenes and ${SEGMENT_SCENES_PER_PART} voiceover segments, numbered 1-${SEGMENT_SCENES_PER_PART} relative to this part.
+`;
+
+  if (storyBible) {
+    prompt += `
+An established story bible already exists for this movie — you MUST reuse it exactly, not invent a new one:
+- Title: ${storyBible.title}
+- Logline: ${storyBible.logline}
+- Theme: ${storyBible.theme}
+- Art style: ${storyBible.artStyle}
+- Act 1 (Beginning) summary: ${storyBible.act1}
+- Act 2 (Middle) summary: ${storyBible.act2}
+- Act 3 (End) summary: ${storyBible.act3}
+- Existing characters (reuse these names and anchor prompts EXACTLY, word-for-word, in every scene that features them): ${JSON.stringify(storyBible.characters || [])}
+- Existing locations (reuse if this part is set there): ${JSON.stringify(storyBible.locations || [])}
+
+Write this part's ${SEGMENT_SCENES_PER_PART} scenes so they dramatize the "${cfg.labelEn}" act summary above (Act ${cfg.index + 1}) in detail. Only introduce a new character or location if the story genuinely needs one that isn't in the lists above; otherwise return the existing characters/locations arrays unchanged (same names, same anchor text).
+`;
+  } else {
+    prompt += `
+No story bible exists yet for this movie — invent the complete one now, covering the FULL planned movie even though you're only writing detailed scenes for the ${cfg.labelEn} part right now:
+1. A title, logline, theme, and art style for the whole movie.
+2. All three act summaries (act1 = Beginning, act2 = Middle, act3 = End), 1-3 Lao sentences each, forming one coherent overall story arc from start to finish. Only the "${cfg.labelEn}" act needs to be dramatized into full scenes right now — the other two acts' summaries are a roadmap the creator will use to generate those parts later, so make each one clear enough to write from on its own.
+3. 2-4 main characters with names, ages, roles, visual descriptions, and English anchor prompts.
+4. 2-4 locations.
+5. Exactly 3 poster concepts, a full social media package, and audio prompts (background music + SFX) for the whole movie — these will not be regenerated when the other parts are written later.
+`;
+  }
+
+  prompt += `
+Requirements for the ${SEGMENT_SCENES_PER_PART} scenes you write now:
+1. Every scene's image prompt must read as a standalone, richly detailed Midjourney/Flux/Google Flow prompt (subject, action, camera angle, lighting, art style) and must incorporate the relevant character anchor description(s) word-for-word so the character looks the same across every scene.
+2. Every scene's motion prompt must describe camera movement only, suitable for an image-to-video tool (Kling/Runway/Google Flow).
+3. Voiceover text is natural, modern, fluent Lao, one segment per scene, matching that scene's action and emotion, in contiguous 10-second increments.
+
+Call the submit_movie_segment tool now with ${storyBible ? "just this part's characters, locations, storyboard, and voiceover" : 'the complete story bible plus this part’s storyboard and voiceover'}.`;
+
+  return prompt;
+}
+
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
@@ -598,6 +832,13 @@ function describeAnthropicError(err) {
   if (status) {
     return `Anthropic API error ${status}: ${apiMessage || err.message}`;
   }
+  // The SDK's own per-request timeout (`timeout: requestTimeoutMs` passed at
+  // the call site) tripped before Claude finished — this is a clear, expected
+  // failure mode for a big scene count, not a crash, so give it a specific,
+  // actionable Lao message instead of the SDK's bare "Request timed out."
+  if (err.constructor && err.constructor.name === 'APIConnectionTimeoutError') {
+    return `Claude ໃຊ້ເວລາດົນເກີນ (timed out) ກ່ອນຈະສ້າງສຳເລັດ — ມັກເກີດເມື່ອເລືອກ Duration ຍາວຫຼາຍ (30/60 ສາກ). ລອງເລືອກ Duration ໃຫ້ສັ້ນລົງ, ຫຼືໃຊ້ "ສ້າງແບບແບ່ງພາກ (Segmented)" ເພື່ອສ້າງເທື່ອລະ ${SEGMENT_SCENES_PER_PART} ສາກແທນ, ແລ້ວລອງໃໝ່.`;
+  }
   // Network-level failures (DNS, proxy, TLS, connection refused) surface here
   // with messages like "fetch failed" / "ENOTFOUND" / "ECONNREFUSED".
   if (err.cause && err.cause.message) {
@@ -657,7 +898,11 @@ app.post('/api/generate', async (req, res) => {
     // default (set on the `anthropic` client below) is a safety net for
     // small requests; this per-request override gives big ones (30/60
     // scenes) enough time instead of failing right as they're about to finish.
-    const requestTimeoutMs = Math.min(9 * 60 * 1000, 90 * 1000 + sceneCount * 8000);
+    // Kept comfortably under the frontend's own AbortController timeout (see
+    // getSceneCountClient/timeoutMs in index.html) so, if this really is too
+    // slow, the user sees THIS specific error message rather than the
+    // frontend's generic "may be unreachable" one.
+    const requestTimeoutMs = Math.min(10 * 60 * 1000, 120 * 1000 + sceneCount * 10000);
 
     const response = await anthropic.messages.create({
       model: MODEL,
@@ -666,7 +911,20 @@ app.post('/api/generate', async (req, res) => {
       tools: [tool],
       tool_choice: { type: 'tool', name: 'submit_movie_package' },
       messages: [{ role: 'user', content: userPrompt }],
-    }, { timeout: requestTimeoutMs });
+    }, {
+      timeout: requestTimeoutMs,
+      // The SDK retries a timed-out request automatically (default: 2
+      // retries) — and each retry gets its OWN full `timeout` budget again,
+      // so a slow 30/60-scene generation could silently take 2-3x
+      // `requestTimeoutMs` in total before ever responding. That's exactly
+      // what caused a "still no response" hang past the frontend's own
+      // timeout even without the computer sleeping: the request hadn't
+      // failed yet, it was quietly retrying. A retry doesn't help here
+      // anyway — a request that's timing out because Claude genuinely needs
+      // more time to write this many scenes will just time out again on
+      // retry — so disable it and fail fast with a clear message instead.
+      maxRetries: 0,
+    });
 
     console.log(`[generate] Claude responded in ${((Date.now() - started) / 1000).toFixed(1)}s (stop_reason=${response.stop_reason}, max_tokens=${maxTokens})`);
 
@@ -714,6 +972,190 @@ app.post('/api/generate', async (req, res) => {
     res.json(pkg);
   } catch (err) {
     console.error('[generate] error:', err);
+    res.status(err && err.status ? err.status : 500).json({ error: describeAnthropicError(err) });
+  }
+});
+
+// Generates ONE part (Beginning/Middle/End, ${SEGMENT_SCENES_PER_PART} scenes
+// each) of a longer movie instead of the whole thing in one call — see the
+// "Segmented generation" comment block near getPartSceneRange() above for why.
+// Merging happens here on the server so the response is always a complete,
+// ready-to-render package (same shape /api/generate returns), whatever order
+// the parts were generated in.
+app.post('/api/generate-segment', async (req, res) => {
+  try {
+    if (!checkRateLimit(req.ip)) {
+      return res.status(429).json({
+        error: `Rate limit reached (max ${RATE_LIMIT_MAX} generations/hour per visitor). Try again later.`,
+      });
+    }
+
+    if (!apiKey) {
+      return res.status(500).json({
+        error: 'No Anthropic API key is set yet. Use the "API Key" button at the top of the page to paste one in — no restart needed.',
+      });
+    }
+
+    const { concept, genre, format, audience, platforms, part, existingProject } = req.body || {};
+    if (!concept || typeof concept !== 'string' || !concept.trim()) {
+      return res.status(400).json({ error: 'A story concept is required.' });
+    }
+    if (!PART_CONFIG[part]) {
+      return res.status(400).json({ error: 'Invalid part — must be "beginning", "middle", or "end".' });
+    }
+
+    // A story bible only counts as "established" if it actually has a title
+    // — an empty/missing existingProject means this is the first part being
+    // generated for this project, whichever part the creator picked first.
+    const hasStoryBible = Boolean(existingProject && existingProject.title);
+    const tool = buildSegmentToolDefinition({ includeStoryBible: !hasStoryBible });
+    const userPrompt = buildSegmentUserPrompt({ concept, genre, format, audience, platforms, part, storyBible: hasStoryBible ? existingProject : null });
+
+    console.log(`[generate-segment] part=${part} hasStoryBible=${hasStoryBible} concept="${concept.slice(0, 60)}..." model=${MODEL}`);
+    const started = Date.now();
+
+    // A part is always exactly SEGMENT_SCENES_PER_PART (20) scenes, so these
+    // budgets don't need to scale with a user-chosen scene count like the
+    // standard endpoint's do — just whether a full story bible needs writing
+    // too (first part) or not (every part after that, a lighter response).
+    const maxTokens = hasStoryBible
+      ? Math.min(16000, 2000 + SEGMENT_SCENES_PER_PART * 500)
+      : Math.min(20000, 6000 + SEGMENT_SCENES_PER_PART * 500);
+    const requestTimeoutMs = Math.min(6 * 60 * 1000, 90 * 1000 + SEGMENT_SCENES_PER_PART * 8000);
+
+    const response = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: maxTokens,
+      system: SYSTEM_PROMPT + SEGMENTED_SYSTEM_ADDENDUM,
+      tools: [tool],
+      tool_choice: { type: 'tool', name: 'submit_movie_segment' },
+      messages: [{ role: 'user', content: userPrompt }],
+    }, { timeout: requestTimeoutMs, maxRetries: 0 }); // see the maxRetries comment in /api/generate above
+
+    console.log(`[generate-segment] Claude responded in ${((Date.now() - started) / 1000).toFixed(1)}s (stop_reason=${response.stop_reason}, max_tokens=${maxTokens})`);
+
+    if (response.stop_reason === 'max_tokens') {
+      return res.status(502).json({
+        error: `Claude ໃຊ້ພື້ນທີ່ຄຳຕອບໝົດກ່ອນຈະສ້າງພາກນີ້ສຳເລັດ (output length limit reached). ລອງກົດ Generate ພາກນີ້ໃໝ່ອີກຄັ້ງ.`,
+      });
+    }
+
+    const toolUse = response.content.find((block) => block.type === 'tool_use' && block.name === 'submit_movie_segment');
+    if (!toolUse) {
+      return res.status(502).json({ error: 'Claude did not return a structured segment. Please try again.' });
+    }
+
+    const seg = toolUse.input;
+
+    const requiredArrays = ['characters', 'locations', 'storyboard', 'voiceover'];
+    const missing = requiredArrays.filter((f) => !Array.isArray(seg[f]) || seg[f].length === 0);
+    if (missing.length > 0) {
+      return res.status(502).json({
+        error: `Claude ສົ່ງພາກນີ້ກັບມາບໍ່ຄົບ (ຂາດ: ${missing.join(', ')}). ລອງກົດ Generate ພາກນີ້ໃໝ່ອີກຄັ້ງ.`,
+      });
+    }
+    if (seg.storyboard.length !== SEGMENT_SCENES_PER_PART || seg.voiceover.length !== SEGMENT_SCENES_PER_PART) {
+      return res.status(502).json({
+        error: `Claude ສ້າງຈຳນວນສາກບໍ່ຖືກຕ້ອງ (ໄດ້ storyboard=${seg.storyboard.length}, voiceover=${seg.voiceover.length}, ຕ້ອງການ ${SEGMENT_SCENES_PER_PART} ອັນລະ). ລອງກົດ Generate ພາກນີ້ໃໝ່ອີກຄັ້ງ.`,
+      });
+    }
+    if (!hasStoryBible) {
+      const bibleFields = ['title', 'logline', 'theme', 'artStyle', 'act1', 'act2', 'act3', 'posters', 'social', 'audio'];
+      const missingBible = bibleFields.filter((f) => {
+        const v = seg[f];
+        return v === undefined || v === null || (Array.isArray(v) && v.length === 0);
+      });
+      if (missingBible.length > 0) {
+        return res.status(502).json({
+          error: `Claude ສ້າງໂຄງເລື່ອງ (story bible) ບໍ່ຄົບ (ຂາດ: ${missingBible.join(', ')}). ລອງກົດ Generate ພາກນີ້ໃໝ່ອີກຄັ້ງ.`,
+        });
+      }
+    }
+
+    // Renumber this chunk's scenes/timecodes to their true position in the
+    // full movie (Claude only needs to think in terms of "scene 1-20 of this
+    // part"; the app is what keeps the whole-movie numbering consistent).
+    const range = getPartSceneRange(part);
+    seg.storyboard.forEach((s, i) => {
+      s.scene = range.start + i;
+      s.time = formatTimeRange((range.start + i - 1) * 10, (range.start + i) * 10);
+    });
+    seg.voiceover.forEach((v, i) => {
+      v.scene = range.start + i; // denormalized purely so the frontend can sort/re-align voiceover with storyboard after merging parts generated out of order
+      v.time = formatTimeRange((range.start + i - 1) * 10, (range.start + i) * 10);
+    });
+
+    // Merge with whatever parts already exist: drop any old scenes in this
+    // part's range (supports regenerating a part) and sort by absolute scene
+    // number, which is what keeps the two arrays positionally aligned (the
+    // Edit Sheet tab matches voiceover[i] to storyboard[i] by index).
+    const prevStoryboard = (existingProject && Array.isArray(existingProject.storyboard)) ? existingProject.storyboard : [];
+    const prevVoiceover = (existingProject && Array.isArray(existingProject.voiceover)) ? existingProject.voiceover : [];
+    const keptStoryboard = prevStoryboard.filter((s) => s.scene < range.start || s.scene > range.end);
+    const keptVoiceover = prevVoiceover.filter((v) => v.scene < range.start || v.scene > range.end);
+    const mergedStoryboard = [...keptStoryboard, ...seg.storyboard].sort((a, b) => a.scene - b.scene);
+    const mergedVoiceover = [...keptVoiceover, ...seg.voiceover].sort((a, b) => a.scene - b.scene);
+
+    // New characters/locations are appended (never replace an existing one
+    // with the same name, so anchor prompts stay byte-for-byte consistent).
+    function mergeByName(existingArr, newArr) {
+      const merged = Array.isArray(existingArr) ? existingArr.slice() : [];
+      (newArr || []).forEach((item) => {
+        if (!merged.some((e) => e.name === item.name)) merged.push(item);
+      });
+      return merged;
+    }
+
+    const pkg = hasStoryBible
+      ? {
+        title: existingProject.title,
+        logline: existingProject.logline,
+        theme: existingProject.theme,
+        artStyle: existingProject.artStyle,
+        act1: existingProject.act1,
+        act2: existingProject.act2,
+        act3: existingProject.act3,
+        posters: existingProject.posters,
+        social: existingProject.social,
+        audio: existingProject.audio,
+        characters: mergeByName(existingProject.characters, seg.characters),
+        locations: mergeByName(existingProject.locations, seg.locations),
+      }
+      : {
+        title: seg.title,
+        logline: seg.logline,
+        theme: seg.theme,
+        artStyle: seg.artStyle,
+        act1: seg.act1,
+        act2: seg.act2,
+        act3: seg.act3,
+        posters: seg.posters,
+        social: seg.social,
+        audio: seg.audio,
+        characters: seg.characters,
+        locations: seg.locations,
+      };
+    pkg.storyboard = mergedStoryboard;
+    pkg.voiceover = mergedVoiceover;
+    pkg.completedParts = Array.from(new Set([...((existingProject && existingProject.completedParts) || []), part]));
+    pkg.segmentScenesPerPart = SEGMENT_SCENES_PER_PART;
+
+    // Save the fully-assembled movie-so-far to history — reopening any
+    // segmented entry always gives a complete, valid state, never a
+    // 20-scene fragment.
+    addToHistory({
+      concept, genre, format, audience,
+      duration: `ແບ່ງພາກ (${pkg.completedParts.length}/3 ພາກ, ${mergedStoryboard.length} ສາກ)`,
+      platforms,
+      pkg: JSON.parse(JSON.stringify(pkg)),
+    });
+
+    recordUsage(response.usage);
+    pkg._usage = getUsageSummary();
+
+    res.json(pkg);
+  } catch (err) {
+    console.error('[generate-segment] error:', err);
     res.status(err && err.status ? err.status : 500).json({ error: describeAnthropicError(err) });
   }
 });
