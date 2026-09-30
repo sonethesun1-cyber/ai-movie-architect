@@ -1326,6 +1326,16 @@ async function checkApiStatus(openModalIfMissing) {
             `).join('');
         }
 
+        // Real generation can now legitimately take several minutes (see the
+        // maxTokens/requestTimeoutMs comments near the fetch calls below —
+        // production logs showed ~50 tokens/sec real-world throughput for
+        // this kind of request). Without some feedback, a multi-minute wait
+        // with a static "Generating..." label looks identical to a frozen
+        // page, so this counts up elapsed seconds to reassure the user it's
+        // still working and shouldn't be closed/reloaded.
+        let generatingIntervalId = null;
+        let generatingStartTime = null;
+
         function setGenerating(isGenerating) {
             const btn = document.getElementById('btnGenerate');
             const icon = document.getElementById('btnGenerateIcon');
@@ -1333,8 +1343,16 @@ async function checkApiStatus(openModalIfMissing) {
             btn.disabled = isGenerating;
             if (isGenerating) {
                 icon.className = 'ph-bold ph-circle-notch text-lg spin';
-                label.innerText = 'Claude ກຳລັງສ້າງ... (Generating...)';
+                generatingStartTime = Date.now();
+                label.innerText = 'Claude ກຳລັງສ້າງ... (0ວິ) — ອາດໃຊ້ເວລາຫຼາຍນາທີ';
+                clearInterval(generatingIntervalId);
+                generatingIntervalId = setInterval(() => {
+                    const elapsed = Math.floor((Date.now() - generatingStartTime) / 1000);
+                    label.innerText = `Claude ກຳລັງສ້າງ... (${elapsed}ວິ) — ອາດໃຊ້ເວລາຫຼາຍນາທີ, ຢ່າປິດ/ໂຫຼດໜ້ານີ້ໃໝ່`;
+                }, 1000);
             } else {
+                clearInterval(generatingIntervalId);
+                generatingIntervalId = null;
                 icon.className = 'ph-bold ph-magic-wand text-lg';
                 updateGenerateButtonLabel(); // restores the mode-appropriate label (standard vs. "generate this part")
             }
@@ -1450,9 +1468,16 @@ async function checkApiStatus(openModalIfMissing) {
             // this timeout doesn't need to scale with a user choice like the
             // standard flow's does — just kept comfortably above the server's
             // own per-part timeout (see requestTimeoutMs in /api/generate-segment).
+            // MUST mirror server.js's maxTokens/requestTimeoutMs formula for
+            // /api/generate-segment (raised after production logs showed a
+            // real 20-scene, no-story-bible part genuinely taking longer than
+            // the old budget — ~50 tokens/sec observed real-world throughput,
+            // not a bug in this app). Always sized for the larger (no-bible)
+            // case since that's the more demanding request.
             const controller = new AbortController();
-            const backendTimeoutMs = Math.min(6 * 60 * 1000, 90 * 1000 + SEGMENT_SCENES_PER_PART_CLIENT * 8000);
-            const timeoutMs = Math.min(8 * 60 * 1000, backendTimeoutMs + 90 * 1000);
+            const segMaxTokensEstimate = Math.min(26000, 9000 + SEGMENT_SCENES_PER_PART_CLIENT * 700);
+            const backendTimeoutMs = Math.min(11 * 60 * 1000, 60 * 1000 + segMaxTokensEstimate * 25);
+            const timeoutMs = Math.min(13 * 60 * 1000, backendTimeoutMs + 90 * 1000);
             const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
             try {
@@ -1536,17 +1561,20 @@ async function checkApiStatus(openModalIfMissing) {
             // Claude taking unusually long on a big scene count) with a
             // client-side timeout, so the user gets a clear message instead
             // of a spinner that never resolves. MUST mirror server.js's own
-            // requestTimeoutMs formula (in /api/generate) plus a buffer, and
-            // stay strictly above it — otherwise the browser gives up before
-            // the server's own timeout ever gets a chance to fire, and the
-            // user sees this generic "may be unreachable" message instead of
-            // the server's specific, more useful one. (Previously this used
-            // a different, smaller formula than the server and could fire
-            // FIRST even for a modest scene count — that was a real bug.)
+            // maxTokens/requestTimeoutMs formula (in /api/generate) plus a
+            // buffer, and stay strictly above it — otherwise the browser
+            // gives up before the server's own timeout ever gets a chance to
+            // fire, and the user sees this generic "may be unreachable"
+            // message instead of the server's specific, more useful one.
+            // (Raised again after production logs showed the real observed
+            // throughput for this kind of request is only ~50 tokens/sec —
+            // both this and the server formula now budget off maxTokens at
+            // that rate instead of guessing per scene.)
             const sceneCountForTimeout = getSceneCountClient(duration);
-            const backendTimeoutMs = Math.min(10 * 60 * 1000, 120 * 1000 + sceneCountForTimeout * 10000);
+            const maxTokensEstimate = Math.min(32000, 5000 + sceneCountForTimeout * 700);
+            const backendTimeoutMs = Math.min(12 * 60 * 1000, 60 * 1000 + maxTokensEstimate * 25);
             const controller = new AbortController();
-            const timeoutMs = Math.min(12 * 60 * 1000, backendTimeoutMs + 90 * 1000);
+            const timeoutMs = Math.min(14 * 60 * 1000, backendTimeoutMs + 90 * 1000);
             const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
             try {
