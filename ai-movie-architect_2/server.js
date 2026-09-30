@@ -892,17 +892,25 @@ app.post('/api/generate', async (req, res) => {
     // ceiling comfortably fits a 60-scene package (~15k tokens in practice)
     // with headroom; if a request still runs out, the stop_reason check
     // below turns that into a clear error instead of a broken package.
-    const maxTokens = Math.min(30000, 3000 + sceneCount * 450);
+    // Raised from the previous 3000+sceneCount*450 formula after a real
+    // production log showed a 12-scene request getting cut off at exactly
+    // that old ceiling (max_tokens=8400, stop_reason='max_tokens') — the old
+    // budget was simply too tight for a moderately detailed concept. This
+    // gives roughly 60% more headroom at every scene count.
+    const maxTokens = Math.min(32000, 5000 + sceneCount * 700);
 
-    // Longer packages take Claude noticeably longer to write. The SDK-level
-    // default (set on the `anthropic` client below) is a safety net for
-    // small requests; this per-request override gives big ones (30/60
-    // scenes) enough time instead of failing right as they're about to finish.
-    // Kept comfortably under the frontend's own AbortController timeout (see
-    // getSceneCountClient/timeoutMs in index.html) so, if this really is too
-    // slow, the user sees THIS specific error message rather than the
-    // frontend's generic "may be unreachable" one.
-    const requestTimeoutMs = Math.min(10 * 60 * 1000, 120 * 1000 + sceneCount * 10000);
+    // Longer packages take Claude noticeably longer to write. This used to
+    // be estimated per scene, but a production log showed the REAL observed
+    // throughput for this kind of long structured tool-call response is only
+    // about 50 tokens/sec — much slower than a short chat reply, and slower
+    // than this formula originally assumed. Budgeting directly off maxTokens
+    // (above) at a conservative 40 tokens/sec, plus a fixed ~60s allowance
+    // for connection setup and prompt processing, reflects that reality
+    // instead of guessing. Kept comfortably under the frontend's own
+    // AbortController timeout (see backendTimeoutMs/timeoutMs in index.html)
+    // so, if this really is too slow, the user sees THIS specific error
+    // message rather than the frontend's generic "may be unreachable" one.
+    const requestTimeoutMs = Math.min(12 * 60 * 1000, 60 * 1000 + maxTokens * 25);
 
     const response = await anthropic.messages.create({
       model: MODEL,
@@ -1018,10 +1026,17 @@ app.post('/api/generate-segment', async (req, res) => {
     // budgets don't need to scale with a user-chosen scene count like the
     // standard endpoint's do — just whether a full story bible needs writing
     // too (first part) or not (every part after that, a lighter response).
+    // Raised (like the standard endpoint above) after production logs showed
+    // both a truncated response and a genuine 250s timeout on just a
+    // 20-scene, no-bible part — the old budgets were too tight on both axes.
     const maxTokens = hasStoryBible
-      ? Math.min(16000, 2000 + SEGMENT_SCENES_PER_PART * 500)
-      : Math.min(20000, 6000 + SEGMENT_SCENES_PER_PART * 500);
-    const requestTimeoutMs = Math.min(6 * 60 * 1000, 90 * 1000 + SEGMENT_SCENES_PER_PART * 8000);
+      ? Math.min(20000, 4000 + SEGMENT_SCENES_PER_PART * 700)
+      : Math.min(26000, 9000 + SEGMENT_SCENES_PER_PART * 700);
+    // Same reasoning as the standard endpoint: budget off maxTokens at the
+    // observed real-world ~40 tokens/sec (with margin), not a flat per-scene
+    // guess — the old formula's exact 250s ceiling is what a production log
+    // showed a real "beginning" part hitting before Claude had finished.
+    const requestTimeoutMs = Math.min(11 * 60 * 1000, 60 * 1000 + maxTokens * 25);
 
     const response = await anthropic.messages.create({
       model: MODEL,
