@@ -44,6 +44,7 @@ The header shows a small badge — green ("Claude API: Ready") once a key is set
 3. Browse all 9 tabs — story, voiceover, characters, storyboard, locations, posters, social, audio, and the edit sheet. Every prompt field has a one-click Copy button.
 4. Use **Export JSON** or **Export MD** in the header to download the whole package for pasting into Midjourney, Flux, Google Flow, Kling, Runway, Suno, Udio, or ElevenLabs.
 5. **"ໂຫຼດຕົວຢ່າງ (Sample)"** just refills the concept box with the demo example and re-renders the built-in sample package — it doesn't call the API, so it's free to click around with.
+6. **"ປະຫວັດ (History)"** in the header lists every package you've generated (newest first) — closing the app, the browser tab, or your computer doesn't lose them. Click one to reload it into all 9 tabs (and refill the sidebar form to match) instead of generating — and paying for — it again. Each entry can be deleted individually (trash icon on hover), or all at once with "ລຶບທັງໝົດ".
 
 **Scope note:** Duration tops out at 10 minutes (60 scenes) per generation — this is a short-form/social-video tool (TikTok, Shorts, Reels), not a feature-film generator. A single generation producing a full-length (60–120 minute) movie package isn't supported: it would mean hundreds of scenes, which is well beyond what one Claude API call can reliably produce, and would cost proportionally more per generation. If you have a longer story, describe it briefly as the concept and pick the longest duration that fits your platform — Claude will condense it into a short-form treatment rather than trying (and failing) to cover the whole thing scene-by-scene.
 
@@ -103,6 +104,10 @@ This is a cutting *order sheet*, not automatic video editing — the app only ev
 ## Usage / cost tracker
 
 A banner between the header and the main dashboard shows a running total of what this app itself has spent: a big dollar figure, the number of generations, and total tokens used, updated automatically every time you click Generate. It's built from the token counts the Claude API returns with every response, priced at that model's published rate — **this is an estimate of what this app has used, not a live read of your real Anthropic account balance** (Anthropic's API has no endpoint that reports your actual remaining credit). Click **Reset** on the banner any time — e.g. right after you top up credits at console.anthropic.com — to zero the counter and start tracking fresh. The total is saved to a small `usage-stats.json` file next to `server.js` so it survives a restart (note: most free hosts, including Render's free tier, wipe the filesystem on every redeploy, so the counter resets then too).
+
+## Generation history
+
+Every time you click Generate, the resulting package is saved automatically — no extra click needed. Open it later from the **"ປະຫວັດ (History)"** button in the header: it lists your past generations (title, concept snippet, genre, duration, date/time), newest first. Clicking one restores it into all 9 tabs and refills the sidebar form fields, exactly as if you'd just generated it. Only the most recent 30 generations are kept (the oldest drops off automatically) to keep the file small; delete one entry with its trash icon or everything at once with "ລຶບທັງໝົດ". Saved to a small `history.json` file next to `server.js` — like the usage tracker, this lives only on the machine running the app and resets on hosts (like Render's free tier) that wipe the filesystem on redeploy.
 
 ## Notes & limits
 

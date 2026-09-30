@@ -24,6 +24,7 @@ const PORT = process.env.PORT || 3000;
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5';
 const ENV_PATH = path.join(__dirname, '.env');
 const USAGE_PATH = path.join(__dirname, 'usage-stats.json');
+const HISTORY_PATH = path.join(__dirname, 'history.json');
 
 // ---------------------------------------------------------------------------
 // Usage / cost tracker. The Anthropic API has no endpoint to read back your
@@ -78,6 +79,50 @@ function getUsageSummary() {
     model: MODEL,
     pricingKnown: Boolean(MODEL_PRICING_PER_MTOK[MODEL]),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Generation history. Every successful /api/generate call is saved here (full
+// package + the form fields that produced it) so a package the user made
+// earlier survives closing the app or the browser tab — they can reopen it
+// from the "ປະຫວັດ (History)" button instead of re-generating (and re-paying
+// for) it. Persisted to a small JSON file next to server.js, same as the
+// usage tracker above; only the most recent HISTORY_MAX_ITEMS are kept so the
+// file can't grow without bound.
+// ---------------------------------------------------------------------------
+const HISTORY_MAX_ITEMS = 30;
+
+let generationHistory = [];
+try {
+  generationHistory = JSON.parse(fs.readFileSync(HISTORY_PATH, 'utf8'));
+  if (!Array.isArray(generationHistory)) generationHistory = [];
+} catch (e) { /* no history file yet — start empty */ }
+
+function saveHistoryToDisk() {
+  try {
+    fs.writeFileSync(HISTORY_PATH, JSON.stringify(generationHistory, null, 2));
+  } catch (e) {
+    console.error('[history] could not persist history.json:', e.message);
+  }
+}
+
+function addToHistory({ concept, genre, format, audience, duration, platforms, pkg }) {
+  generationHistory.unshift({
+    id: crypto.randomUUID(),
+    createdAt: new Date().toISOString(),
+    title: (pkg && pkg.title) || (concept || '').slice(0, 60),
+    concept,
+    genre,
+    format,
+    audience,
+    duration,
+    platforms: platforms || [],
+    pkg,
+  });
+  if (generationHistory.length > HISTORY_MAX_ITEMS) {
+    generationHistory.length = HISTORY_MAX_ITEMS; // drop the oldest
+  }
+  saveHistoryToDisk();
 }
 
 // Trim defensively: a stray trailing newline/space in .env (common when a
@@ -429,6 +474,46 @@ app.post('/api/usage/reset', (req, res) => {
   res.json(getUsageSummary());
 });
 
+// Generation history (see the tracker near the top of this file). The list
+// endpoint leaves out each entry's full `pkg` (which can be large) — the
+// frontend fetches that separately, only for the one entry the user picks.
+app.get('/api/history', (req, res) => {
+  res.json(generationHistory.map((h) => ({
+    id: h.id,
+    createdAt: h.createdAt,
+    title: h.title,
+    concept: h.concept,
+    genre: h.genre,
+    format: h.format,
+    audience: h.audience,
+    duration: h.duration,
+  })));
+});
+
+app.get('/api/history/:id', (req, res) => {
+  const entry = generationHistory.find((h) => h.id === req.params.id);
+  if (!entry) {
+    return res.status(404).json({ error: 'ບໍ່ພົບປະຫວັດການສ້າງນີ້ (ອາດຖືກລຶບ ຫຼືເກີນ 30 ຄັ້ງລ່າສຸດທີ່ບັນທຶກໄວ້).' });
+  }
+  res.json(entry);
+});
+
+app.delete('/api/history/:id', (req, res) => {
+  const before = generationHistory.length;
+  generationHistory = generationHistory.filter((h) => h.id !== req.params.id);
+  if (generationHistory.length === before) {
+    return res.status(404).json({ error: 'Not found.' });
+  }
+  saveHistoryToDisk();
+  res.json({ ok: true });
+});
+
+app.delete('/api/history', (req, res) => {
+  generationHistory = [];
+  saveHistoryToDisk();
+  res.json({ ok: true });
+});
+
 // ---------------------------------------------------------------------------
 // Lightweight per-IP rate limit on the expensive endpoint. This is a second
 // line of defense behind SITE_PASSWORD (or the only defense, if this app is
@@ -617,6 +702,11 @@ app.post('/api/generate', async (req, res) => {
 
     // Re-number scenes defensively in case the model's numbering drifted.
     pkg.storyboard.forEach((s, i) => { s.scene = i + 1; });
+
+    // Save this successful package to history (a plain deep copy, so later
+    // additions like `_usage` below never leak into the saved history entry)
+    // before responding, so it survives the user closing the app/tab.
+    addToHistory({ concept, genre, format, audience, duration, platforms, pkg: JSON.parse(JSON.stringify(pkg)) });
 
     recordUsage(response.usage);
     pkg._usage = getUsageSummary(); // lets the frontend update the big usage display without a second round trip
