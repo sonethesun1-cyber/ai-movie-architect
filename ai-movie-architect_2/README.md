@@ -1,11 +1,11 @@
 # AI Movie Architect
 
-Turns a one-line story concept into a complete AI movie production package — logline & 3-act script, a timed Lao voiceover script, character profiles with image-consistency "anchor" prompts, a full scene-by-scene storyboard (image + camera-motion prompts), location/background prompts, 3 poster concepts, a social media/SEO package, and music/SFX prompts — generated live by the Claude API and shown in the dark "Cinema" dashboard UI.
+Turns a one-line story concept into a complete AI movie production package — logline & 3-act script, a timed Lao voiceover script, character profiles with image-consistency "anchor" prompts (and an optional real AI-generated portrait you can view and regenerate), a full scene-by-scene storyboard (image + camera-motion prompts, with optional real generated storyboard images), location/background prompts (with optional real generated images), 3 poster concepts (with optional real generated images), a social media/SEO package, and music/SFX prompts — generated live by the Claude API and shown in a modern red-black dashboard UI.
 
 ## What this is
 
-- `public/index.html` — the dashboard UI (unchanged in look/feel from the original mockup: 8 tabs, sidebar generator form, copy buttons, JSON/Markdown export).
-- `server.js` — a small Express server that serves that UI and exposes `POST /api/generate`, which calls the Claude API server-side (your API key never reaches the browser) and returns a structured JSON production package that the UI renders.
+- `public/index.html` — the dashboard UI: 9 tabs, sidebar generator form, copy buttons, JSON/Markdown export, and (optionally) real in-app image generation on the Character/Storyboard/Location/Poster cards.
+- `server.js` — a small Express server that serves that UI and exposes `POST /api/generate` (calls the Claude API server-side — your Anthropic key never reaches the browser — and returns a structured JSON production package) plus `POST /api/generate-image` (calls Google's Gemini image API server-side, same never-reaches-the-browser handling, for the optional real-image feature below).
 
 ## Setup (easy way — no terminal typing)
 
@@ -66,6 +66,8 @@ Set these in `.env` (see `.env.example`):
 |---|---|---|
 | `ANTHROPIC_API_KEY` | *(required)* | Your Anthropic API key. Never sent to the browser. |
 | `ANTHROPIC_MODEL` | `claude-sonnet-5` | Swap to `claude-opus-5` for higher-quality (slower/pricier) output. |
+| `GOOGLE_API_KEY` | *(optional)* | Your Google AI Studio API key, **only** needed if you want the real "ສ້າງຮູບ (Generate Image)" feature (see below). Everything else in the app works fully without it. Never sent to the browser. |
+| `GOOGLE_IMAGE_MODEL` | `gemini-3.1-flash-image` | Which Gemini image model to call. |
 | `PORT` | `3000` | Port the app runs on. |
 | `SITE_PASSWORD` | *(blank)* | Optional. Leave blank for local/private use. Set this before putting the app anywhere public — see below. |
 | `GENERATE_RATE_LIMIT_PER_HOUR` | `20` | Max "Generate" clicks allowed per visitor per hour, regardless of password — a second safety net against runaway API costs. |
@@ -147,9 +149,23 @@ The Audio/SFX card works differently on purpose: Claude's API can look at a pict
 
 For a character specifically, revising its card also updates its Lao visual description and English anchor prompt together (since those two are meant to describe the same look). If the anchor prompt changes, the app automatically finds and replaces the old anchor text everywhere it was already embedded in storyboard Image Prompts and poster prompts (per the schema's "word-for-word" consistency rule), so already-generated scenes stay visually consistent with the revised character — you'll see a toast confirming how many scenes were updated. Every tab that displays a prompt always reads it fresh from the same underlying project data, so this propagation reaches everywhere that prompt shows up (including the Edit Sheet tab), not just the tab you revised it from.
 
+## Generating real images in-app (ສ້າງຮູບ / Generate Image)
+
+Every Character, Storyboard scene, Location, and Poster card has a **"ສ້າງຮູບ (Generate Image)"** button that calls Google's Gemini image model (`gemini-3.1-flash-image`, aka "Nano Banana 2") directly from the app and shows you an actual picture — not just the text prompt — so you can see what a character/scene/location/poster looks like without copying anything into another website. Click **"ສ້າງຮູບໃໝ່"** under an existing image any time to regenerate it (e.g. after editing the prompt).
+
+This feature is **entirely optional and off by default**:
+
+- It requires its own **Google API key** (separate from your Anthropic key), because Google's Gemini image generation is a different service with no free tier — pricing is roughly **$0.03–0.07 per image** depending on size/quality, billed to your own Google account. Get one at [aistudio.google.com](https://aistudio.google.com), enable billing, then paste it into the same **"API Key"** popup used for your Anthropic key (it now has a second, clearly-marked, optional field for the Google key — you can fill in either field independently, e.g. to add a Google key later without re-entering your Anthropic key).
+- If you skip it, every other part of the app works exactly as before — you just won't see the "ສ້າງຮູບ" button do anything until a Google key is set (it'll tell you to add one).
+- If you've already uploaded a reference photo on that card (the "ແກ້ໄຂ Prompt ຈາກຮູບຕົວຢ່າງ" upload just below the image box), that same photo is sent along as a reference so the generated image can match it, instead of generating from the text prompt alone.
+- The aspect ratio is read automatically from the `--ar` tag already at the end of each prompt (the same tag meant for pasting into Midjourney/Flux), so a 9:16 vertical prompt generates a 9:16 vertical image, a 1:1 poster prompt generates a square image, and so on — no extra setting to configure.
+- Generated images are stored in your browser (IndexedDB, not the server), namespaced to the specific project they belong to, so they survive closing/reopening the app and don't mix up between different movies or History entries. Like History and your current-project autosave, this means they're tied to the one browser/device you generated them in.
+
+**Video and audio stay manual on purpose.** Video generation was deliberately *not* automated: Google Flow's free daily credits (the common free workflow for turning these prompts into video) are only usable on Flow's own website and have no API access at any price, and a true automated alternative (Google's Veo API) charges per second of video with no free tier — so the Motion Prompt stays a copy-paste into Google Flow (or Kling/Runway) exactly as before. Audio/music prompts are also still text-only, unchanged.
+
 ## Notes & limits
 
-- This app only generates **text** — the script, prompts, and captions. It does not call Midjourney/Kling/Suno/etc. itself; you paste the generated prompts into those tools yourself, per the copy buttons.
+- This app generates the full **text** production package itself (script, prompts, captions) plus, optionally, real **images** for characters/scenes/locations/posters via Google's Gemini API (see above, requires its own Google API key and billing). It does not call Flow/Kling/Suno/etc. itself for video or audio — you paste those generated prompts into those tools yourself, per the copy buttons.
 - Each generation is a single Claude API call and costs against your Anthropic account per its normal token pricing.
-- The API key lives only in your local `.env` file (written there for you when you use the in-app popup) and is used only by `server.js`; it's excluded from git via `.gitignore` and never sent anywhere except directly to the Anthropic API.
+- Both API keys (Anthropic, and Google if you set one) live only in your local `.env` file (written there for you when you use the in-app popup) and are used only by `server.js`; `.env` is excluded from git via `.gitignore`, and each key is sent only to its own provider's API (Anthropic key → Anthropic, Google key → Google) — never to the browser or anywhere else.
 - Running it locally (the launcher scripts) is completely private — only reachable from your own computer. Deploying it (previous section) makes it reachable by anyone with the URL, which is why `SITE_PASSWORD` exists; keep it set on any copy you don't want to pay for on strangers' behalf.

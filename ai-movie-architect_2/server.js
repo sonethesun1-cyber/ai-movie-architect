@@ -136,6 +136,14 @@ let anthropic = new Anthropic({
   timeout: 180000, // 3 minutes — fail with a clear error instead of hanging
 });
 
+// Separate, optional key for real image generation (see the "/api/generate-image"
+// section below). Claude's own API only produces text — turning a generated
+// prompt into an actual picture needs a second provider (Google's Gemini
+// image models, branded "Nano Banana"). The app works exactly as before
+// (prompts only, no pictures) until this is set via "API Key" → "Google API
+// Key (for images)"; nothing breaks or is required to use the rest of the app.
+let googleApiKey = (process.env.GOOGLE_API_KEY || '').trim();
+
 // ---------------------------------------------------------------------------
 // Optional access gate — matters once this app is deployed somewhere public.
 // Locally, with SITE_PASSWORD unset, the app behaves exactly as before (no
@@ -508,6 +516,143 @@ The creator's description of what they want: "${String(notes).trim()}"`;
   } catch (err) {
     console.error('[revise-prompt] error:', err);
     res.status(err && err.status ? err.status : 500).json({ error: describeAnthropicError(err) });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Real image generation (Google Gemini "Nano Banana" image models) — turns a
+// generated prompt into an actual picture the creator can look at, instead of
+// only text to copy into a separate site. Completely separate system from
+// everything above: Claude never sees this, and this never touches Claude's
+// usage/cost tracker (Google bills and reports usage on its own side, via
+// Google AI Studio / Cloud Console).
+//
+// Registered here (before the global express.json({limit:'1mb'}) below, after
+// the auth gate above) for the same reason as /api/revise-character and
+// /api/revise-prompt: an optional reference image for an image-EDIT call is
+// much bigger than ordinary JSON, so this route needs its own larger body
+// limit to get first look at the request before the smaller app-wide one
+// would reject it.
+// ---------------------------------------------------------------------------
+const GOOGLE_IMAGE_MODEL = process.env.GOOGLE_IMAGE_MODEL || 'gemini-3.1-flash-image';
+const GOOGLE_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+
+function describeGoogleImageError(err) {
+  if (!err) return 'ສ້າງຮູບບໍ່ສຳເລັດ (ບໍ່ຮູ້ສາເຫດ).';
+  const status = err.status;
+  if (status === 401 || status === 403) {
+    return 'Google ປະຕິເສດ API key (ບໍ່ຖືກຕ້ອງ, ບໍ່ມີສິດໃຊ້ Image Generation, ຫຼືຍັງບໍ່ໄດ້ເປີດ billing). Gemini image generation ບໍ່ມີ free tier — ກວດສອບວ່າໄດ້ເປີດ billing ໄວ້ແລ້ວຢູ່ Google AI Studio / Cloud Console, ແລ້ວລອງໃໝ່.';
+  }
+  if (status === 429) {
+    return 'Google Image API ຈຳກັດອັດຕາການໃຊ້ງານ (rate limit) ຫຼືເຄຣດິດໝົດ. ລໍຖ້າບຶດນຶ່ງແລ້ວລອງໃໝ່.';
+  }
+  if (status === 400) {
+    return `Google ປະຕິເສດຄຳຮ້ອງຂໍ (400)${err.message ? ': ' + err.message : ''}`;
+  }
+  if (status) {
+    return `Google Image API error ${status}${err.message ? ': ' + err.message : ''}`;
+  }
+  if (err.cause && err.cause.message) {
+    return `ຕິດຕໍ່ Google API ບໍ່ໄດ້: ${err.message} (${err.cause.message}). ກວດອິນເຕີເນັດ/proxy.`;
+  }
+  return err.message || 'ສ້າງຮູບບໍ່ສຳເລັດ (ບໍ່ຮູ້ສາເຫດ).';
+}
+
+// `referenceImageBase64`/`referenceImageMediaType` are optional: when given,
+// this becomes an image-EDIT call (existing reference photo + text
+// instructions in, one modified image out) instead of a plain text-to-image
+// call — the same "upload a reference image" pattern already used for the
+// prompt-revision features above, reused here to actually transform the
+// picture instead of just rewriting its prompt text.
+async function callGoogleImageGeneration({ prompt, aspectRatio, referenceImageBase64, referenceImageMediaType }) {
+  const input = [{ type: 'text', text: prompt }];
+  if (referenceImageBase64) {
+    input.push({ type: 'image', mime_type: referenceImageMediaType || 'image/jpeg', data: referenceImageBase64 });
+  }
+  const body = {
+    model: GOOGLE_IMAGE_MODEL,
+    input,
+    response_format: { type: 'image', mime_type: 'image/jpeg', aspect_ratio: aspectRatio || '1:1' },
+  };
+
+  let response;
+  try {
+    response = await fetch(`${GOOGLE_API_BASE}/interactions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': googleApiKey },
+      body: JSON.stringify(body),
+    });
+  } catch (networkErr) {
+    throw Object.assign(new Error(networkErr.message), { cause: networkErr });
+  }
+
+  const raw = await response.text();
+  let data = null;
+  try { data = JSON.parse(raw); } catch (e) { /* non-JSON error body, handled below */ }
+
+  if (!response.ok) {
+    const message = (data && data.error && (data.error.message || data.error)) || raw.slice(0, 300) || response.statusText;
+    throw Object.assign(new Error(message), { status: response.status });
+  }
+
+  // Defensive parsing: Google's documented response nests the image at
+  // interaction.output_image, but this is a newer API and documentation
+  // shapes have been known to shift — also check the older
+  // generateContent-style candidates[].content.parts[].inlineData shape, so
+  // a small drift between what's documented and what's actually returned
+  // doesn't silently break every image generation.
+  const direct = data && data.interaction && data.interaction.output_image;
+  if (direct && direct.data) {
+    return { imageBase64: direct.data, imageMediaType: direct.mime_type || 'image/jpeg' };
+  }
+  const partsImage = data && Array.isArray(data.candidates) && data.candidates[0] && data.candidates[0].content &&
+    (data.candidates[0].content.parts || []).find((p) => p.inlineData && p.inlineData.data);
+  if (partsImage) {
+    return { imageBase64: partsImage.inlineData.data, imageMediaType: partsImage.inlineData.mimeType || 'image/jpeg' };
+  }
+
+  console.error('[generate-image] unexpected Google response shape:', raw.slice(0, 500));
+  throw Object.assign(new Error('Google ສົ່ງຄືນຂໍ້ມູນຮູບພາບໃນຮູບແບບທີ່ບໍ່ຄາດຄິດ (API ອາດມີການປ່ຽນແປງ). ລອງໃໝ່ພາຍຫຼັງ, ຫຼືແຈ້ງຜູ້ພັດທະນາຖ້າຍັງຄືເກົ່າ.'), { code: 'UNEXPECTED_SHAPE' });
+}
+
+app.post('/api/generate-image', express.json({ limit: '6mb' }), async (req, res) => {
+  try {
+    if (!checkRateLimit(req.ip)) {
+      return res.status(429).json({
+        error: `Rate limit reached (max ${RATE_LIMIT_MAX} generations/hour per visitor). Try again later.`,
+      });
+    }
+    if (!googleApiKey) {
+      return res.status(500).json({
+        error: 'ຍັງບໍ່ໄດ້ຕັ້ງ Google API Key. ກົດ "API Key" ດ້ານເທິງ ແລ້ວໃສ່ Google API Key (ສຳລັບສ້າງຮູບ) — ບໍ່ຕ້ອງ restart server.',
+      });
+    }
+
+    const { prompt, aspectRatio, referenceImageBase64, referenceImageMediaType } = req.body || {};
+    if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+      return res.status(400).json({ error: 'A prompt is required.' });
+    }
+    if (referenceImageBase64) {
+      const imageError = validateImagePayload(referenceImageBase64, referenceImageMediaType);
+      if (imageError) return res.status(imageError.status).json({ error: imageError.error });
+    }
+
+    let result;
+    try {
+      result = await callGoogleImageGeneration({
+        prompt: prompt.trim(),
+        aspectRatio,
+        referenceImageBase64: referenceImageBase64 || null,
+        referenceImageMediaType,
+      });
+    } catch (err) {
+      return res.status(err.status && err.status >= 400 && err.status < 600 ? err.status : 502).json({ error: describeGoogleImageError(err) });
+    }
+
+    res.json({ imageBase64: result.imageBase64, imageMediaType: result.imageMediaType });
+  } catch (err) {
+    console.error('[generate-image] error:', err);
+    res.status(500).json({ error: 'ສ້າງຮູບລົ້ມເຫຼວ: ' + (err && err.message ? err.message : String(err)) });
   }
 });
 
@@ -963,6 +1108,7 @@ Call the submit_movie_segment tool now with ${storyBible ? "just this part's cha
 app.get('/api/health', (req, res) => {
   res.json({
     configured: Boolean(apiKey),
+    googleConfigured: Boolean(googleApiKey),
     model: MODEL,
     authRequired: Boolean(SITE_PASSWORD),
   });
@@ -1083,6 +1229,49 @@ app.post('/api/set-key', (req, res) => {
     res.json({ ok: true, model: MODEL });
   } catch (err) {
     console.error('[set-key] error:', err);
+    res.status(500).json({ error: 'Could not save the key to .env: ' + (err && err.message ? err.message : String(err)) });
+  }
+});
+
+// Same pattern as /api/set-key above, for the separate, optional Google API
+// key that powers real image generation (see the "/api/generate-image"
+// section). Google AI Studio keys don't have one single fixed prefix the way
+// Anthropic's do, so this only checks for an obviously-wrong (empty / too
+// short) value rather than a strict format — a genuinely invalid key still
+// gets caught immediately anyway, the first time it's used, via the 401/403
+// handling in describeGoogleImageError().
+app.post('/api/set-google-key', (req, res) => {
+  try {
+    const submittedKey = ((req.body && req.body.googleApiKey) || '').trim();
+    if (!submittedKey) {
+      return res.status(400).json({ error: 'Please paste a Google API key.' });
+    }
+    if (submittedKey.length < 10) {
+      return res.status(400).json({ error: 'That key looks too short — double-check you copied the whole thing from Google AI Studio (aistudio.google.com).' });
+    }
+
+    let envContents = '';
+    try {
+      envContents = fs.readFileSync(ENV_PATH, 'utf8');
+    } catch (readErr) {
+      envContents = ''; // .env doesn't exist yet — we'll create it below
+    }
+
+    const line = `GOOGLE_API_KEY=${submittedKey}`;
+    if (/^GOOGLE_API_KEY=.*$/m.test(envContents)) {
+      envContents = envContents.replace(/^GOOGLE_API_KEY=.*$/m, line);
+    } else {
+      envContents = envContents.trim().length ? `${envContents.trim()}\n${line}\n` : `${line}\n`;
+    }
+    fs.writeFileSync(ENV_PATH, envContents, 'utf8');
+
+    // Apply immediately — no server restart required.
+    googleApiKey = submittedKey;
+
+    console.log('[set-google-key] Google API key saved to .env and applied.');
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[set-google-key] error:', err);
     res.status(500).json({ error: 'Could not save the key to .env: ' + (err && err.message ? err.message : String(err)) });
   }
 });
