@@ -276,32 +276,40 @@ function validateImagePayload(imageBase64, imageMediaType) {
   return null;
 }
 
-// Shared by every "revise from reference image" route: sends one vision call
-// forcing the given tool, and — since a tool schema's `required` list is only
-// a strong hint, not a guarantee (see the identical reasoning on the segment
-// endpoint above) — auto-retries once with a sharper prompt if the response
-// comes back missing one of `requiredFields`. Throws an Error whose `.code`
-// is 'MAX_TOKENS', 'NO_TOOL_USE', or 'MISSING_FIELDS' (with `.fields`) so the
-// calling route can turn it into the right Lao message; any other throw is a
-// genuine Anthropic SDK/network error for the caller's own catch block.
+// Shared by every "revise from reference image" route: sends one vision (or,
+// when `imageBase64` is falsy, plain text) call forcing the given tool, and —
+// since a tool schema's `required` list is only a strong hint, not a
+// guarantee (see the identical reasoning on the segment endpoint above) —
+// auto-retries once with a sharper prompt if the response comes back missing
+// one of `requiredFields`. Throws an Error whose `.code` is 'MAX_TOKENS',
+// 'NO_TOOL_USE', or 'MISSING_FIELDS' (with `.fields`) so the calling route
+// can turn it into the right Lao message; any other throw is a genuine
+// Anthropic SDK/network error for the caller's own catch block.
+//
+// `imageBase64`/`imageMediaType` are optional: the Audio tab's revision flow
+// has no image at all (Claude's API has no audio-understanding input — it
+// can see pictures, not hear sound — so for that one surface the creator
+// types a description instead; see the /api/revise-prompt route below). When
+// omitted, this sends a text-only message instead of attaching an image
+// block.
 async function callVisionRevisionTool({ tool, requiredFields, systemPrompt, buildUserText, imageBase64, imageMediaType, maxTokens, requestTimeoutMs }) {
   const MAX_ATTEMPTS = 2;
   let lastMissing = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const userText = buildUserText(lastMissing);
+    const content = imageBase64
+      ? [
+          { type: 'text', text: userText },
+          { type: 'image', source: { type: 'base64', media_type: imageMediaType, data: imageBase64 } },
+        ]
+      : [{ type: 'text', text: userText }];
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: maxTokens,
       system: systemPrompt,
       tools: [tool],
       tool_choice: { type: 'tool', name: tool.name },
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'text', text: userText },
-          { type: 'image', source: { type: 'base64', media_type: imageMediaType, data: imageBase64 } },
-        ],
-      }],
+      messages: [{ role: 'user', content }],
     }, { timeout: requestTimeoutMs, maxRetries: 0 }); // see the maxRetries comment on /api/generate above
 
     recordUsage(response.usage);
@@ -442,25 +450,45 @@ app.post('/api/revise-prompt', express.json({ limit: '6mb' }), async (req, res) 
     if (!currentText || typeof currentText !== 'string' || !currentText.trim()) {
       return res.status(400).json({ error: 'An existing prompt to revise is required.' });
     }
-    const imageError = validateImagePayload(imageBase64, imageMediaType);
-    if (imageError) return res.status(imageError.status).json({ error: imageError.error });
+
+    // Audio/SFX prompts are the one surface with no image step at all —
+    // Claude's API can see a picture but can't listen to a sound file, so
+    // that tab has the creator type what they want changed instead (see the
+    // README's "Revising a prompt" section). Every other surface still sends
+    // a reference image, so an image is required UNLESS a non-empty written
+    // description was sent in its place.
+    const hasImage = imageBase64 !== undefined && imageBase64 !== null && imageBase64 !== '';
+    const hasNotes = !!(notes && String(notes).trim());
+    if (hasImage) {
+      const imageError = validateImagePayload(imageBase64, imageMediaType);
+      if (imageError) return res.status(imageError.status).json({ error: imageError.error });
+    } else if (!hasNotes) {
+      return res.status(400).json({ error: 'Please describe what you want changed, or attach a reference image.' });
+    }
 
     const originalArTag = preserveArTag ? (currentText.match(/--ar\s+\S+/) || [])[0] || '' : '';
     const tool = buildPromptRevisionTool();
 
-    const baseUserText = `Here is an existing prompt from an AI-movie production package:
+    const baseUserText = hasImage
+      ? `Here is an existing prompt from an AI-movie production package:
 ${context ? `Context: ${context}\n` : ''}Current prompt: "${currentText}"
 
-The creator has attached a reference image showing what they actually want (for example, a test render that came out wrong, or a mood/style/location photo they want to match). Study the attached image carefully and rewrite the prompt so it faithfully matches what's shown in the image, while keeping the same purpose and the same rich, standardized level of detail as the original.${originalArTag ? ` End it with the exact same aspect ratio tag the original had ("${originalArTag}").` : ''}${notes && String(notes).trim() ? `\n\nThe creator also specifically asked for: "${String(notes).trim()}"` : ''}`;
+The creator has attached a reference image showing what they actually want (for example, a test render that came out wrong, or a mood/style/location photo they want to match). Study the attached image carefully and rewrite the prompt so it faithfully matches what's shown in the image, while keeping the same purpose and the same rich, standardized level of detail as the original.${originalArTag ? ` End it with the exact same aspect ratio tag the original had ("${originalArTag}").` : ''}${hasNotes ? `\n\nThe creator also specifically asked for: "${String(notes).trim()}"` : ''}`
+      : `Here is an existing prompt from an AI-movie production package:
+${context ? `Context: ${context}\n` : ''}Current prompt: "${currentText}"
+
+There is no reference image this time — instead, the creator wrote down exactly what they want changed. Read their description carefully and rewrite the prompt to match it, while keeping the same purpose and the same rich, standardized level of detail as the original.${originalArTag ? ` End it with the exact same aspect ratio tag the original had ("${originalArTag}").` : ''}
+
+The creator's description of what they want: "${String(notes).trim()}"`;
 
     let revised;
     try {
       revised = await callVisionRevisionTool({
         tool,
         requiredFields: ['text'],
-        systemPrompt: 'You are a meticulous prompt-engineering assistant for an AI film production tool. You analyze a reference image and translate it into precise, reusable text-to-image (or audio) prompt language.',
+        systemPrompt: 'You are a meticulous prompt-engineering assistant for an AI film production tool. You translate a reference image, or the creator\'s own written description, into precise, reusable text-to-image (or audio) prompt language.',
         buildUserText: (missing) => !missing ? baseUserText : `${baseUserText}\n\nIMPORTANT: Your previous attempt returned an empty/missing "text" field. This time you MUST include it as a non-empty string.`,
-        imageBase64,
+        imageBase64: hasImage ? imageBase64 : null,
         imageMediaType,
         maxTokens: 800,
         requestTimeoutMs: 75 * 1000,

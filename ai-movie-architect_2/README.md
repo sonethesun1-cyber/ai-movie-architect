@@ -126,19 +126,25 @@ Every time you click Generate, the resulting package is saved automatically — 
 
 This is saved in **your browser's own storage (localStorage)**, not on the server — a host like Render wipes its filesystem on every restart/redeploy/spin-down-and-wake, which used to silently erase history saved there. Browser storage survives that, at the cost of being tied to the one browser/device you're using — it won't show up if you open the app in a different browser or computer.
 
-## Revising a prompt from a reference image
+## Your current project is kept automatically
 
-Any time a generated prompt doesn't match what you pictured — a character's look, a location's background, a poster's composition, or an audio/SFX cue's mood — you can upload a reference image right on that card and have Claude rewrite the prompt to match it. This works the same way on five different cards:
+Separately from History above (which only snapshots a finished package the moment Generate completes), the app also continuously saves whichever project is currently open — including anything you've changed since: a prompt revised from a reference image, a scene added or removed, or which of the standard/segmented modes you were using and how far a segmented project had gotten. This also lives in your browser's localStorage, so closing the tab, closing the browser, or the server spinning down and the page reloading will all bring you right back to exactly what you had open, instead of the built-in sample movie. You'll see a small confirmation toast ("ໂຫຼດວຽກທີ່ເຮັດຄ້າງໄວ້ລ່າສຸດກັບມາແລ້ວ") the next time you open the app if there was anything to restore. As with History, this is tied to the one browser/device you're using.
 
-- **"ຕົວລະຄອນ (Cast)"** tab — revise a character's visual description + anchor prompt
-- **"Shot-by-Shot Storyboard Matrix"** — revise a scene's Image Prompt
-- **"ສະຖານທີ່ & ສາກຫຼັງ (Set Environments)"** — revise a location's Background Prompt
-- **"ຂໍ້ກຳນົດສ້າງໜ້າປົກໜັງ (Movie Poster Specs)"** — revise a poster's Image Prompt
-- **"ດົນຕີປະກອບ & ສຽງ Effect Prompts (Suno / Udio / SFX)"** — revise an audio/SFX prompt
+## Revising a prompt from a reference image (or a description, for audio)
 
-On any of these cards, click **"ອັບໂຫລດຮູບ"**, pick a reference image (a test render that came out wrong, or a mood/style/location photo you want to match), optionally add a short note (e.g. "shorter hair" / "ຜົມສັ້ນກວ່ານີ້"), then click **"ແກ້ໄຂ Prompt ຕາມຮູບນີ້"**. Claude looks at the image and rewrites just that one prompt to match it — keeping the same purpose and level of detail, and for image prompts, the same `--ar` aspect-ratio tag — without touching anything else in the package. The image is resized in your browser before upload (to keep it fast and cheap) and is not saved anywhere; only the resulting text is kept.
+Any time a generated prompt doesn't match what you pictured — a character's look, a location's background, a poster's composition, or an audio/SFX cue's mood — you can revise just that one prompt without re-running the whole generation. This works on five different cards:
 
-For a character specifically, revising its card also updates its Lao visual description and English anchor prompt together (since those two are meant to describe the same look). If the anchor prompt changes, the app automatically finds and replaces the old anchor text everywhere it was already embedded in storyboard Image Prompts and poster prompts (per the schema's "word-for-word" consistency rule), so already-generated scenes stay visually consistent with the revised character — you'll see a toast confirming how many scenes were updated.
+- **"ຕົວລະຄອນ (Cast)"** tab — revise a character's visual description + anchor prompt, from a reference **image**
+- **"Shot-by-Shot Storyboard Matrix"** — revise a scene's Image Prompt, from a reference **image**
+- **"ສະຖານທີ່ & ສາກຫຼັງ (Set Environments)"** — revise a location's Background Prompt, from a reference **image**
+- **"ຂໍ້ກຳນົດສ້າງໜ້າປົກໜັງ (Movie Poster Specs)"** — revise a poster's Image Prompt, from a reference **image**
+- **"ດົນຕີປະກອບ & ສຽງ Effect Prompts (Suno / Udio / SFX)"** — revise an audio/SFX prompt, from a typed **description**
+
+On the four image-based cards, click **"ອັບໂຫລດຮູບ"**, pick a reference image (a test render that came out wrong, or a mood/style/location photo you want to match), optionally add a short note (e.g. "shorter hair" / "ຜົມສັ້ນກວ່ານີ້"), then click **"ແກ້ໄຂ Prompt ຕາມຮູບນີ້"**. Claude looks at the image and rewrites just that one prompt to match it — keeping the same purpose and level of detail, and the same `--ar` aspect-ratio tag — without touching anything else in the package. The image is resized in your browser before upload (to keep it fast and cheap) and is not saved anywhere; only the resulting text is kept.
+
+The Audio/SFX card works differently on purpose: Claude's API can look at a picture but has no way to listen to an uploaded sound file or a voice recording, so instead of an upload button, that card has a text box — just type what you want changed (e.g. "ໃຫ້ຈັງຫວະໄວຂຶ້ນ, ມືດ/ໜັກຂຶ້ນ" / "make it faster-paced and darker") and click **"ແກ້ໄຂ Prompt ຕາມຄຳອະທິບາຍ"**. Claude rewrites the music/SFX prompt based on your written description.
+
+For a character specifically, revising its card also updates its Lao visual description and English anchor prompt together (since those two are meant to describe the same look). If the anchor prompt changes, the app automatically finds and replaces the old anchor text everywhere it was already embedded in storyboard Image Prompts and poster prompts (per the schema's "word-for-word" consistency rule), so already-generated scenes stay visually consistent with the revised character — you'll see a toast confirming how many scenes were updated. Every tab that displays a prompt always reads it fresh from the same underlying project data, so this propagation reaches everywhere that prompt shows up (including the Edit Sheet tab), not just the tab you revised it from.
 
 ## Notes & limits
 
