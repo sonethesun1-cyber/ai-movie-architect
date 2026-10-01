@@ -56,6 +56,7 @@ The header shows a small badge — green ("Claude API: Ready") once a key is set
 - Aspect ratio (`9:16` / `16:9` / `1:1`) is extracted from your format choice and every image/poster prompt is required to end with the matching `--ar` tag.
 - Lao is used for everything a human reads (script, voiceover, captions); English is used for everything an image/video/music AI reads (anchor prompts, scene prompts, motion prompts, poster prompts, audio prompts) — matching how Midjourney/Flux/Kling/Suno etc. expect their prompts.
 - Character anchor descriptions are required to be reused inside each scene's image prompt, which is what keeps a character's look consistent across every generated frame.
+- Every voiceover line is labeled with who says it — either "ຜູ້ບັນຍາຍ (Narrator)" for narration, or the exact name of whichever character is speaking that line as dialogue — so the Voiceover and Edit Sheet tabs can show a colored badge (one consistent color per character, gray for the narrator) instead of leaving you to guess from the wording alone. A package generated before this existed (an older History entry, say) just shows every line as the narrator by default rather than breaking.
 
 ## Configuration
 

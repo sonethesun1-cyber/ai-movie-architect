@@ -601,9 +601,10 @@ function buildToolDefinition(sceneCount) {
             properties: {
               time: { type: 'string', description: 'Timecode range like "00:00 - 00:10".' },
               emotion: { type: 'string', description: 'Emotional tone tag in Lao, e.g. "ຕື່ນເຕັ້ນ".' },
-              text: { type: 'string', description: 'Natural, modern spoken Lao narration for this segment.' },
+              speaker: { type: 'string', description: 'Who says this line, so the creator can tell narration from character dialogue at a glance: either the exact literal string "ຜູ້ບັນຍາຍ (Narrator)" for narration, or — if this line is one character speaking as dialogue — that character\'s "name" field value, copied EXACTLY character-for-character (so the app can match it back to that character).' },
+              text: { type: 'string', description: 'Natural, modern spoken Lao narration or dialogue for this segment.' },
             },
-            required: ['time', 'emotion', 'text'],
+            required: ['time', 'emotion', 'speaker', 'text'],
           },
         },
         characters: {
@@ -717,6 +718,7 @@ Language rules (follow exactly):
 - Write all narrative/creative, human-facing Lao content in natural, modern, fluent Lao script: logline, theme, act summaries, character name/age/role/visual description, voiceover text, scene descriptions, poster text overlays, social titles/description/keywords.
 - Write all fields destined for English-only AI image/video/music generation tools entirely in English, richly descriptive, comma-separated keyword style typical of Midjourney/Flux/Google Flow prompts: character anchor prompts, image prompts, motion prompts, location background prompts, poster image prompts, and audio/SFX prompts. Always end every image-generation prompt (character anchor is an exception if you prefer, but scene/location/poster image prompts especially) with the exact aspect ratio tag provided in the user message (e.g. "--ar 9:16").
 - Keep every character's name spelling and visual identity identical everywhere it appears, and make sure each scene's imagePrompt actually incorporates the relevant character's anchor description so images stay visually consistent across the whole short film — this consistency is the entire point of the anchor prompt.
+- Every voiceover segment needs a "speaker" so the creator can tell at a glance whether a line is narration or one character talking: use the exact literal string "ຜູ້ບັນຍາຍ (Narrator)" for narration lines, or that character's exact "name" field value (character-for-character identical, not a nickname or shortened form) when the line is that character's own spoken dialogue. Don't default every line to the narrator — if the scene description implies a character is speaking (a line of dialogue, a shout, a question to another character), write it as that character's line instead of folding it into narration.
 - Timecodes must be contiguous and non-overlapping across the full runtime, formatted as "MM:SS - MM:SS".
 - Tailor the hashtags and keywords to the specific platforms the user selected.`;
 
@@ -736,7 +738,7 @@ function buildUserPrompt({ concept, genre, format, audience, duration, platforms
 - Target platforms: ${platformList}
 
 Requirements:
-1. Produce exactly ${sceneCount} storyboard scenes and exactly ${sceneCount} voiceover segments, both covering 00:00 to ${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, '0')} in contiguous 10-second increments, in the same order.
+1. Produce exactly ${sceneCount} storyboard scenes and exactly ${sceneCount} voiceover segments, both covering 00:00 to ${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, '0')} in contiguous 10-second increments, in the same order. Label each voiceover segment's "speaker" as either the narrator or the specific character speaking that line (see the system prompt's speaker rule) — mix narration and character dialogue naturally across the ${sceneCount} segments rather than making everything narration.
 2. Every scene's image prompt must read as a standalone, richly detailed Midjourney/Flux/Google Flow prompt (subject, action, camera angle, lighting, art style) and must incorporate the relevant character anchor description(s) so the character looks the same across every scene.
 3. Every scene's motion prompt must describe camera movement only, suitable for an image-to-video tool (Kling/Runway/Google Flow), one or two sentences.
 4. Give 2-4 locations with English, character-free environment prompts.
@@ -819,9 +821,10 @@ function buildSegmentToolDefinition({ includeStoryBible }) {
         properties: {
           time: { type: 'string', description: 'Timecode range within this part, like "00:00 - 00:10".' },
           emotion: { type: 'string', description: 'Emotional tone tag in Lao, e.g. "ຕື່ນເຕັ້ນ".' },
-          text: { type: 'string', description: 'Natural, modern spoken Lao narration for this segment.' },
+          speaker: { type: 'string', description: 'Who says this line, so the creator can tell narration from character dialogue at a glance: either the exact literal string "ຜູ້ບັນຍາຍ (Narrator)" for narration, or — if this line is one character speaking as dialogue — that character\'s "name" field value, copied EXACTLY character-for-character (so the app can match it back to that character).' },
+          text: { type: 'string', description: 'Natural, modern spoken Lao narration or dialogue for this segment.' },
         },
-        required: ['time', 'emotion', 'text'],
+        required: ['time', 'emotion', 'speaker', 'text'],
       },
     },
   };
@@ -946,7 +949,7 @@ No story bible exists yet for this movie — invent the complete one now, coveri
 Requirements for the ${SEGMENT_SCENES_PER_PART} scenes you write now:
 1. Every scene's image prompt must read as a standalone, richly detailed Midjourney/Flux/Google Flow prompt (subject, action, camera angle, lighting, art style) and must incorporate the relevant character anchor description(s) word-for-word so the character looks the same across every scene.
 2. Every scene's motion prompt must describe camera movement only, suitable for an image-to-video tool (Kling/Runway/Google Flow).
-3. Voiceover text is natural, modern, fluent Lao, one segment per scene, matching that scene's action and emotion, in contiguous 10-second increments.
+3. Voiceover text is natural, modern, fluent Lao, one segment per scene, matching that scene's action and emotion, in contiguous 10-second increments. Label each segment's "speaker" as either the narrator or the specific character speaking that line (see the system prompt's speaker rule) — mix narration and character dialogue naturally rather than making everything narration.
 
 Call the submit_movie_segment tool now with ${storyBible ? "just this part's characters, locations, storyboard, and voiceover" : 'the complete story bible plus this part’s storyboard and voiceover'}.`;
 
