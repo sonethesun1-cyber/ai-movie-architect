@@ -1227,13 +1227,30 @@ async function checkApiStatus(openModalIfMissing) {
                         <h4 class="font-bold text-slate-100 text-sm">${c.name}</h4>
                         <span class="text-xs px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">${c.age} | ${c.role}</span>
                     </div>
-                    <p class="text-xs text-slate-300 leading-relaxed"><strong>ລັກສະນະ:</strong> ${c.visual}</p>
+                    <p class="text-xs text-slate-300 leading-relaxed" id="charVisualText-${i}"><strong>ລັກສະນະ:</strong> <span>${escapeHtml(c.visual)}</span></p>
                     <div class="pt-2 border-t border-slate-800/80">
                         <div class="flex items-center justify-between mb-1">
                             <span class="text-[10px] font-bold uppercase tracking-wider text-indigo-400">Character Anchor Prompt:</span>
-                            <button onclick="navigator.clipboard.writeText('${c.anchor.replace(/'/g, "\\'")}')" class="text-[11px] text-indigo-400 hover:underline">Copy Anchor</button>
+                            <button onclick="copyCharacterAnchor(${i})" class="text-[11px] text-indigo-400 hover:underline">Copy Anchor</button>
                         </div>
-                        <p class="text-[11px] text-slate-400 font-mono bg-slate-950/80 p-2 rounded-lg border border-slate-800 leading-normal select-all">${c.anchor}</p>
+                        <p class="text-[11px] text-slate-400 font-mono bg-slate-950/80 p-2 rounded-lg border border-slate-800 leading-normal select-all" id="charAnchorText-${i}">${escapeHtml(c.anchor)}</p>
+                    </div>
+                    <div class="pt-2 border-t border-slate-800/80 space-y-2">
+                        <span class="text-[10px] font-bold uppercase tracking-wider text-emerald-400">ແກ້ໄຂ Prompt ຈາກຮູບຕົວຢ່າງ (Reference Image)</span>
+                        <div class="flex items-center gap-2">
+                            <label class="text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 cursor-pointer transition flex items-center gap-1.5 flex-shrink-0">
+                                <i class="ph-bold ph-image"></i> ອັບໂຫລດຮູບ
+                                <input type="file" accept="image/*" class="hidden" onchange="handleCharacterImageSelected(${i}, this)">
+                            </label>
+                            <img id="charImgPreview-${i}" class="hidden h-9 w-9 object-cover rounded-lg border border-slate-700 flex-shrink-0" />
+                            <span id="charImgFileName-${i}" class="text-[10px] text-slate-500 truncate"></span>
+                        </div>
+                        <div id="charImgReviseRow-${i}" class="hidden space-y-1.5">
+                            <input type="text" id="charImgNotes-${i}" placeholder="ຕ້ອງການປ່ຽນຫຍັງ (ບໍ່ບັງຄັບ, ເຊັ່ນ: ຜົມສັ້ນກວ່ານີ້)" class="w-full text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-950/80 border border-slate-800 text-slate-200 placeholder-slate-600">
+                            <button onclick="reviseCharacterFromImage(${i})" id="charImgReviseBtn-${i}" class="text-[11px] w-full py-1.5 rounded-lg bg-emerald-700/80 hover:bg-emerald-600 text-white font-semibold transition flex items-center justify-center gap-1.5">
+                                <i class="ph-bold ph-magic-wand"></i> ແກ້ໄຂ Prompt ຕາມຮູບນີ້
+                            </button>
+                        </div>
                     </div>
                 </div>
             `).join('');
@@ -1512,16 +1529,26 @@ async function checkApiStatus(openModalIfMissing) {
             // this timeout doesn't need to scale with a user choice like the
             // standard flow's does — just kept comfortably above the server's
             // own per-part timeout (see requestTimeoutMs in /api/generate-segment).
-            // MUST mirror server.js's maxTokens/requestTimeoutMs formula for
-            // /api/generate-segment (raised after production logs showed a
+            // MUST mirror server.js's maxTokens/requestTimeoutMs/MAX_SEGMENT_ATTEMPTS
+            // for /api/generate-segment (raised after production logs showed a
             // real 20-scene, no-story-bible part genuinely taking longer than
             // the old budget — ~50 tokens/sec observed real-world throughput,
             // not a bug in this app). Always sized for the larger (no-bible)
             // case since that's the more demanding request.
+            //
+            // The server can now silently retry up to SEGMENT_MAX_ATTEMPTS_CLIENT
+            // times in a row INSIDE this one request if Claude's response comes
+            // back incomplete (missing a required field) — each retry is its own
+            // full Claude call, so this timeout has to cover the worst case of
+            // every attempt needing the full per-attempt budget, not just one.
+            // That makes the ceiling quite long (tens of minutes) for the rare
+            // worst case; the typical case resolves on attempt 1 or 2 in a few
+            // minutes, same as before.
+            const SEGMENT_MAX_ATTEMPTS_CLIENT = 4; // mirrors MAX_SEGMENT_ATTEMPTS in server.js
             const controller = new AbortController();
             const segMaxTokensEstimate = Math.min(26000, 9000 + SEGMENT_SCENES_PER_PART_CLIENT * 700);
-            const backendTimeoutMs = Math.min(11 * 60 * 1000, 60 * 1000 + segMaxTokensEstimate * 25);
-            const timeoutMs = Math.min(13 * 60 * 1000, backendTimeoutMs + 90 * 1000);
+            const backendTimeoutMs = Math.min(25 * 60 * 1000, (60 * 1000 + segMaxTokensEstimate * 25) * SEGMENT_MAX_ATTEMPTS_CLIENT);
+            const timeoutMs = Math.min(27 * 60 * 1000, backendTimeoutMs + 90 * 1000);
             const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
             try {
@@ -1683,6 +1710,159 @@ async function checkApiStatus(openModalIfMissing) {
             document.getElementById('inputConcept').value = "ເດັກນ້ອຍລາວຜູ້ໜຶ່ງຄົ້ນພົບຫຸ່ນພົນອໍໂຕ້ໃນປ່າບູຮານ ເຊິ່ງສາມາດປ່ຽນພະລັງງານແສງອາທິດມາເປັນເຄື່ອງປູກຜັກອັດໂຕໂນມັດ...";
             renderAllTabs();
             showToast("ໂຫຼດ Project ຕົວຢ່າງສຳເລັດ!");
+        }
+
+        // ---------------------------------------------------------------------
+        // Character reference-image revision — upload a photo (e.g. a test
+        // render that didn't look right) and have Claude rewrite that one
+        // character's visual description + image-generation anchor prompt to
+        // match it, without re-running the whole generation.
+        // ---------------------------------------------------------------------
+        const characterImageDrafts = {}; // { [charIndex]: { base64, mediaType, fileName } }, kept in memory only — not persisted or sent anywhere until "ແກ້ໄຂ Prompt" is pressed
+
+        function copyCharacterAnchor(i) {
+            const c = currentProject.characters[i];
+            if (!c) return;
+            navigator.clipboard.writeText(c.anchor);
+            showToast('ຄັດລອກ Anchor Prompt ແລ້ວ');
+        }
+
+        // Downscales + re-encodes the picked image client-side before upload:
+        // keeps the request small/fast and the vision-call cost low, and
+        // avoids the (unlikely but real) chance of a huge phone photo
+        // blowing past the server's 6MB request limit.
+        function fileToResizedBase64(file, maxDim, quality) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onerror = () => reject(new Error('Could not read the selected file.'));
+                reader.onload = () => {
+                    const img = new Image();
+                    img.onerror = () => reject(new Error('Could not decode the selected file as an image.'));
+                    img.onload = () => {
+                        let { width, height } = img;
+                        if (width > maxDim || height > maxDim) {
+                            const scale = maxDim / Math.max(width, height);
+                            width = Math.round(width * scale);
+                            height = Math.round(height * scale);
+                        }
+                        const canvas = document.createElement('canvas');
+                        canvas.width = width;
+                        canvas.height = height;
+                        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+                        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+                        resolve({ base64: dataUrl.split(',')[1], mediaType: 'image/jpeg' });
+                    };
+                    img.src = reader.result;
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function handleCharacterImageSelected(i, inputEl) {
+            const file = inputEl.files && inputEl.files[0];
+            if (!file) return;
+            try {
+                const { base64, mediaType } = await fileToResizedBase64(file, 1024, 0.85);
+                characterImageDrafts[i] = { base64, mediaType, fileName: file.name };
+                const preview = document.getElementById(`charImgPreview-${i}`);
+                preview.src = `data:${mediaType};base64,${base64}`;
+                preview.classList.remove('hidden');
+                document.getElementById(`charImgFileName-${i}`).innerText = file.name;
+                document.getElementById(`charImgReviseRow-${i}`).classList.remove('hidden');
+            } catch (err) {
+                showToast('ອ່ານຮູບບໍ່ໄດ້: ' + err.message, true);
+            } finally {
+                inputEl.value = ''; // allow picking the same file again later
+            }
+        }
+
+        async function reviseCharacterFromImage(i) {
+            const draft = characterImageDrafts[i];
+            const character = currentProject.characters[i];
+            if (!draft || !character) {
+                showToast('ກະລຸນາອັບໂຫລດຮູບກ່ອນ', true);
+                return;
+            }
+            const oldAnchor = character.anchor; // captured before the request so we can propagate the change below
+            const notes = (document.getElementById(`charImgNotes-${i}`) || {}).value || '';
+            const btn = document.getElementById(`charImgReviseBtn-${i}`);
+            const originalBtnHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="ph-bold ph-circle-notch spin"></i> ກຳລັງແກ້ໄຂ...';
+
+            // A single small vision call — much lighter than a full
+            // generation, but still a real network round trip, so guard
+            // against a hang the same way the other two flows do.
+            const controller = new AbortController();
+            const timeoutMs = 3 * 60 * 1000;
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+            try {
+                let res;
+                try {
+                    res = await fetch('/api/revise-character', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            character: { name: character.name, age: character.age, role: character.role, visual: character.visual, anchor: character.anchor },
+                            imageBase64: draft.base64,
+                            imageMediaType: draft.mediaType,
+                            notes,
+                        }),
+                        signal: controller.signal,
+                    });
+                } catch (networkErr) {
+                    if (networkErr.name === 'AbortError') {
+                        throw new Error('ໝົດເວລາ (timed out) ລໍຖ້າ Claude. ລອງໃໝ່ອີກຄັ້ງ.');
+                    }
+                    throw new Error('ຕິດຕໍ່ server ບໍ່ໄດ້ (network error: ' + networkErr.message + ').');
+                }
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Revision failed (HTTP ' + res.status + ')');
+
+                character.visual = data.visual;
+                character.anchor = data.anchor;
+
+                // The storyboard's imagePrompt (and sometimes poster prompts)
+                // are generated with the OLD anchor text copied in verbatim
+                // (so the character looks consistent scene-to-scene) — just
+                // updating the character card wouldn't touch those already-
+                // generated scenes, silently leaving them describing the old
+                // look. Propagate the change by replacing every exact
+                // occurrence of the old anchor text with the new one.
+                let updatedScenes = 0;
+                if (oldAnchor && oldAnchor !== data.anchor) {
+                    (currentProject.storyboard || []).forEach((sb) => {
+                        if (sb.imagePrompt && sb.imagePrompt.includes(oldAnchor)) {
+                            sb.imagePrompt = sb.imagePrompt.split(oldAnchor).join(data.anchor);
+                            updatedScenes++;
+                        }
+                    });
+                    (currentProject.posters || []).forEach((p) => {
+                        if (p.prompt && p.prompt.includes(oldAnchor)) {
+                            p.prompt = p.prompt.split(oldAnchor).join(data.anchor);
+                        }
+                    });
+                }
+
+                delete characterImageDrafts[i]; // this character's card is about to be rebuilt fresh by renderAllTabs()
+                renderAllTabs(); // refreshes the Characters, Storyboard, and Poster tabs with the propagated text
+                if (data._usage) renderUsage(data._usage); else fetchUsage();
+
+                if (updatedScenes > 0) {
+                    showToast(`ແກ້ໄຂ Prompt ຂອງ "${character.name}" ສຳເລັດ! ອັບເດດ imagePrompt ໃນ ${updatedScenes} ສາກນຳອັດຕະໂນມັດ.`);
+                } else if (oldAnchor && oldAnchor !== data.anchor && (currentProject.storyboard || []).length) {
+                    showToast(`ແກ້ໄຂ Prompt ຂອງ "${character.name}" ສຳເລັດແລ້ວ — ແຕ່ບໍ່ພົບຂໍ້ຄວາມ anchor ເກົ່າຢູ່ໃນສາກໃດເລີຍ, ອາດຕ້ອງໄປແກ້ Image Prompt ຂອງບາງສາກດ້ວຍຕົນເອງ.`);
+                } else {
+                    showToast(`ແກ້ໄຂ Prompt ຂອງ "${character.name}" ຕາມຮູບສຳເລັດແລ້ວ!`);
+                }
+            } catch (err) {
+                showToast('ເກີດຂໍ້ຜິດພາດ: ' + err.message, true);
+            } finally {
+                clearTimeout(timeoutId);
+                btn.disabled = false;
+                btn.innerHTML = originalBtnHtml;
+            }
         }
 
         function addNewScene() {
