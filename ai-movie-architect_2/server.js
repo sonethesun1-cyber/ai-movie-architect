@@ -237,6 +237,140 @@ app.use((req, res, next) => {
   return res.redirect('/login');
 });
 
+// ---------------------------------------------------------------------------
+// Revise one character's visual description + image-generation anchor prompt
+// to match a reference photo the creator uploads (e.g. a test render that
+// didn't look right, or a face they want to match more closely). This is a
+// small, fast vision call — nowhere near the size of a full movie/segment
+// generation — so it gets its own lighter budgets and a simpler 2-attempt
+// retry rather than the segmented endpoint's full machinery.
+//
+// Registered here, BEFORE the app-wide express.json({limit:'1mb'}) below
+// (but AFTER the auth gate above, so it's still password-protected the same
+// as every other /api/* route) — same pattern as /api/login above. Express
+// runs middleware/routes in registration order and stops at whichever one
+// answers the request, so this route's own larger express.json({limit:'6mb'})
+// — needed because a base64 image is much bigger than ordinary JSON — gets
+// first look at the request body instead of being capped by the smaller
+// app-wide limit meant for everything else.
+// ---------------------------------------------------------------------------
+const ALLOWED_IMAGE_MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+
+function buildCharacterRevisionTool() {
+  return {
+    name: 'submit_character_revision',
+    description: "Submit the revised visual description and image-generation anchor prompt for this one character, updated to match the creator's reference image.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        visual: { type: 'string', description: 'Updated detailed visual description (face, hair, eyes, body, outfit) in Lao, matching the reference image.' },
+        anchor: { type: 'string', description: "Updated standardized ENGLISH character-anchor prompt string, richly descriptive, matching the reference image, ending with the SAME --ar aspect ratio tag as the original anchor prompt provided." },
+      },
+      required: ['visual', 'anchor'],
+    },
+  };
+}
+
+app.post('/api/revise-character', express.json({ limit: '6mb' }), async (req, res) => {
+  try {
+    if (!checkRateLimit(req.ip)) {
+      return res.status(429).json({
+        error: `Rate limit reached (max ${RATE_LIMIT_MAX} generations/hour per visitor). Try again later.`,
+      });
+    }
+    if (!apiKey) {
+      return res.status(500).json({
+        error: 'No Anthropic API key is set yet. Use the "API Key" button at the top of the page to paste one in — no restart needed.',
+      });
+    }
+
+    const { character, imageBase64, imageMediaType, notes } = req.body || {};
+    if (!character || typeof character !== 'object' || !character.anchor || !character.visual) {
+      return res.status(400).json({ error: 'A character (with existing anchor/visual text) is required.' });
+    }
+    if (!imageBase64 || typeof imageBase64 !== 'string') {
+      return res.status(400).json({ error: 'A reference image is required.' });
+    }
+    if (!ALLOWED_IMAGE_MEDIA_TYPES.includes(imageMediaType)) {
+      return res.status(400).json({ error: `Unsupported image type "${imageMediaType}" — use JPEG, PNG, WEBP, or GIF.` });
+    }
+    // Rough cap on the decoded image size (base64 is ~4/3 the original byte
+    // size) so one request can't tie up the server with a huge upload —
+    // the frontend already downscales before sending, so a legitimate photo
+    // should never get near this.
+    if (imageBase64.length > 7_000_000) {
+      return res.status(413).json({ error: 'Reference image is too large. Please use a smaller image.' });
+    }
+
+    const originalArTag = (character.anchor.match(/--ar\s+\S+/) || [])[0] || '';
+    const tool = buildCharacterRevisionTool();
+
+    const baseUserText = `Here is one character from an AI-movie production package:
+- Name: ${character.name || ''}
+- Age: ${character.age || ''}
+- Role: ${character.role || ''}
+- Current Lao visual description: ${character.visual}
+- Current English anchor prompt: ${character.anchor}
+
+The creator has attached a reference image showing how they actually want this character to look (for example, a test render that came out wrong, or a face/style they want to match). Study the attached image carefully and rewrite BOTH fields so they faithfully match what's shown in the image, while keeping this character's name, age, and story role unchanged. Keep the anchor prompt in the same rich, standardized style as the original (same level of detail, same kind of phrasing for use with Midjourney/Flux/etc.), and end it with the exact same aspect ratio tag the original had${originalArTag ? ` ("${originalArTag}")` : ''}.${notes && String(notes).trim() ? `\n\nThe creator also specifically asked for: "${String(notes).trim()}"` : ''}`;
+
+    const MAX_ATTEMPTS = 2;
+    let revised = null;
+    let lastMissing = null;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS && !revised; attempt++) {
+      const userText = attempt === 1
+        ? baseUserText
+        : `${baseUserText}\n\nIMPORTANT: Your previous attempt was missing: ${lastMissing.join(', ')}. This time you MUST include both "visual" and "anchor" as non-empty strings.`;
+
+      const response = await anthropic.messages.create({
+        model: MODEL,
+        max_tokens: 1500,
+        system: 'You are a meticulous visual continuity assistant for an AI film production tool. You analyze a reference image and translate it into precise, reusable text-to-image prompt language.',
+        tools: [tool],
+        tool_choice: { type: 'tool', name: 'submit_character_revision' },
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: userText },
+            { type: 'image', source: { type: 'base64', media_type: imageMediaType, data: imageBase64 } },
+          ],
+        }],
+      }, { timeout: 90 * 1000, maxRetries: 0 }); // see the maxRetries comment on /api/generate above
+
+      recordUsage(response.usage);
+
+      if (response.stop_reason === 'max_tokens') {
+        return res.status(502).json({ error: 'Claude ໃຊ້ພື້ນທີ່ຄຳຕອບໝົດກ່ອນຈະແກ້ໄຂສຳເລັດ. ລອງໃໝ່ອີກຄັ້ງ.' });
+      }
+      const toolUse = response.content.find((block) => block.type === 'tool_use' && block.name === 'submit_character_revision');
+      if (!toolUse) {
+        return res.status(502).json({ error: 'Claude did not return a structured revision. Please try again.' });
+      }
+      const candidate = toolUse.input;
+      const missing = ['visual', 'anchor'].filter((f) => !candidate[f] || typeof candidate[f] !== 'string' || !candidate[f].trim());
+      if (missing.length === 0) {
+        revised = candidate;
+      } else if (attempt < MAX_ATTEMPTS) {
+        lastMissing = missing;
+      } else {
+        return res.status(502).json({ error: `Claude ຕອບກັບມາບໍ່ຄົບ (ຂາດ: ${missing.join(', ')}). ລອງໃໝ່ອີກຄັ້ງ.` });
+      }
+    }
+
+    // Safety net: if Claude's new anchor somehow dropped the aspect-ratio
+    // tag despite being asked to keep it, re-append the original one rather
+    // than silently shipping a prompt some image tools will reject.
+    if (originalArTag && !/--ar\s+\S+/.test(revised.anchor)) {
+      revised.anchor = `${revised.anchor.trim()} ${originalArTag}`;
+    }
+
+    res.json({ visual: revised.visual, anchor: revised.anchor, _usage: getUsageSummary() });
+  } catch (err) {
+    console.error('[revise-character] error:', err);
+    res.status(err && err.status ? err.status : 500).json({ error: describeAnthropicError(err) });
+  }
+});
+
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 

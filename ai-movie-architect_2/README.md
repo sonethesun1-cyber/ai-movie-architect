@@ -122,7 +122,13 @@ A banner between the header and the main dashboard shows a running total of what
 
 ## Generation history
 
-Every time you click Generate, the resulting package is saved automatically — no extra click needed. Open it later from the **"ປະຫວັດ (History)"** button in the header: it lists your past generations (title, concept snippet, genre, duration, date/time), newest first. Clicking one restores it into all 9 tabs and refills the sidebar form fields, exactly as if you'd just generated it. Only the most recent 30 generations are kept (the oldest drops off automatically) to keep the file small; delete one entry with its trash icon or everything at once with "ລຶບທັງໝົດ". Saved to a small `history.json` file next to `server.js` — like the usage tracker, this lives only on the machine running the app and resets on hosts (like Render's free tier) that wipe the filesystem on redeploy.
+Every time you click Generate, the resulting package is saved automatically — no extra click needed. Open it later from the **"ປະຫວັດ (History)"** button in the header: it lists your past generations (title, concept snippet, genre, duration, date/time), newest first. Clicking one restores it into all 9 tabs and refills the sidebar form fields, exactly as if you'd just generated it. Only the most recent 20 generations are kept (the oldest drops off automatically) to stay well within quota; delete one entry with its trash icon or everything at once with "ລຶບທັງໝົດ".
+
+This is saved in **your browser's own storage (localStorage)**, not on the server — a host like Render wipes its filesystem on every restart/redeploy/spin-down-and-wake, which used to silently erase history saved there. Browser storage survives that, at the cost of being tied to the one browser/device you're using — it won't show up if you open the app in a different browser or computer.
+
+## Revising a character from a reference image
+
+If a character's generated look doesn't match what you pictured (or a test render came out wrong), open the **"ຕົວລະຄອນ (Cast)"** tab, click **"ອັບໂຫລດຮູບ"** on that character's card, and pick a reference image. Optionally add a short note (e.g. "shorter hair" / "ຜົມສັ້ນກວ່ານີ້"), then click **"ແກ້ໄຂ Prompt ຕາມຮູບນີ້"**. Claude looks at the image and rewrites that one character's Lao visual description and English anchor prompt to match it — keeping the same name/age/role and the same `--ar` aspect-ratio tag — without touching any other character, scene, or part of the package. The image is resized in your browser before upload (to keep it fast and cheap) and is not saved anywhere; only the resulting text is kept.
 
 ## Notes & limits
 
