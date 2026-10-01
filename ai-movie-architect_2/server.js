@@ -1017,10 +1017,9 @@ app.post('/api/generate-segment', async (req, res) => {
     // generated for this project, whichever part the creator picked first.
     const hasStoryBible = Boolean(existingProject && existingProject.title);
     const tool = buildSegmentToolDefinition({ includeStoryBible: !hasStoryBible });
-    const userPrompt = buildSegmentUserPrompt({ concept, genre, format, audience, platforms, part, storyBible: hasStoryBible ? existingProject : null });
+    const baseUserPrompt = buildSegmentUserPrompt({ concept, genre, format, audience, platforms, part, storyBible: hasStoryBible ? existingProject : null });
 
     console.log(`[generate-segment] part=${part} hasStoryBible=${hasStoryBible} concept="${concept.slice(0, 60)}..." model=${MODEL}`);
-    const started = Date.now();
 
     // A part is always exactly SEGMENT_SCENES_PER_PART (20) scenes, so these
     // budgets don't need to scale with a user-chosen scene count like the
@@ -1038,51 +1037,90 @@ app.post('/api/generate-segment', async (req, res) => {
     // showed a real "beginning" part hitting before Claude had finished.
     const requestTimeoutMs = Math.min(11 * 60 * 1000, 60 * 1000 + maxTokens * 25);
 
-    const response = await anthropic.messages.create({
-      model: MODEL,
-      max_tokens: maxTokens,
-      system: SYSTEM_PROMPT + SEGMENTED_SYSTEM_ADDENDUM,
-      tools: [tool],
-      tool_choice: { type: 'tool', name: 'submit_movie_segment' },
-      messages: [{ role: 'user', content: userPrompt }],
-    }, { timeout: requestTimeoutMs, maxRetries: 0 }); // see the maxRetries comment in /api/generate above
-
-    console.log(`[generate-segment] Claude responded in ${((Date.now() - started) / 1000).toFixed(1)}s (stop_reason=${response.stop_reason}, max_tokens=${maxTokens})`);
-
-    if (response.stop_reason === 'max_tokens') {
-      return res.status(502).json({
-        error: `Claude ໃຊ້ພື້ນທີ່ຄຳຕອບໝົດກ່ອນຈະສ້າງພາກນີ້ສຳເລັດ (output length limit reached). ລອງກົດ Generate ພາກນີ້ໃໝ່ອີກຄັ້ງ.`,
-      });
+    // A tool schema's `required` list is only a strong hint to Claude, not an
+    // enforced guarantee — on a response this large (full story bible + 20
+    // detailed scenes in one call) Claude can finish normally (not
+    // truncated) yet still quietly drop a required field. That's a different
+    // failure from running out of max_tokens (handled separately below,
+    // where no amount of retrying fixes a budget that's genuinely too
+    // small), so it gets its own check and — since it's a fast, cheap
+    // mistake rather than a real resource shortage — is worth auto-retrying
+    // once with a sharper prompt before making the user click Generate again.
+    function validateSegment(seg) {
+      const requiredArrays = ['characters', 'locations', 'storyboard', 'voiceover'];
+      const missingArrays = requiredArrays.filter((f) => !Array.isArray(seg[f]) || seg[f].length === 0);
+      if (missingArrays.length > 0) {
+        return { fields: missingArrays, message: `Claude ສົ່ງພາກນີ້ກັບມາບໍ່ຄົບ (ຂາດ: ${missingArrays.join(', ')}).` };
+      }
+      if (seg.storyboard.length !== SEGMENT_SCENES_PER_PART || seg.voiceover.length !== SEGMENT_SCENES_PER_PART) {
+        return { fields: [], message: `Claude ສ້າງຈຳນວນສາກບໍ່ຖືກຕ້ອງ (ໄດ້ storyboard=${seg.storyboard.length}, voiceover=${seg.voiceover.length}, ຕ້ອງການ ${SEGMENT_SCENES_PER_PART} ອັນລະ).` };
+      }
+      if (!hasStoryBible) {
+        const bibleFields = ['title', 'logline', 'theme', 'artStyle', 'act1', 'act2', 'act3', 'posters', 'social', 'audio'];
+        const missingBible = bibleFields.filter((f) => {
+          const v = seg[f];
+          return v === undefined || v === null || (Array.isArray(v) && v.length === 0);
+        });
+        if (missingBible.length > 0) {
+          return { fields: missingBible, message: `Claude ສ້າງໂຄງເລື່ອງ (story bible) ບໍ່ຄົບ (ຂາດ: ${missingBible.join(', ')}).` };
+        }
+      }
+      return null;
     }
 
-    const toolUse = response.content.find((block) => block.type === 'tool_use' && block.name === 'submit_movie_segment');
-    if (!toolUse) {
-      return res.status(502).json({ error: 'Claude did not return a structured segment. Please try again.' });
-    }
+    // Raised from 2 to 4 after a creator reported having to click Generate
+    // manually too often when the first auto-retry still came back
+    // incomplete — they'd rather the app kept trying on its own. Not made
+    // unbounded: each attempt is a full, several-minute Claude call sitting
+    // inside this ONE browser request (see the matching timeout math in
+    // index.html's generateSegment()), so an uncapped loop would mean an
+    // extremely long-lived connection (fragile on its own — the whole reason
+    // this segmented mode exists is to avoid exactly that) and, if something
+    // were systematically wrong, unbounded API cost with no success in
+    // sight. 4 gives real persistence while keeping a hard ceiling; every
+    // case seen so far has resolved by attempt 2.
+    const MAX_SEGMENT_ATTEMPTS = 4;
+    let seg = null;
+    let lastValidationError = null;
+    for (let attempt = 1; attempt <= MAX_SEGMENT_ATTEMPTS && !seg; attempt++) {
+      const userPrompt = attempt === 1
+        ? baseUserPrompt
+        : `${baseUserPrompt}\n\nIMPORTANT: Your previous attempt was rejected for being incomplete — it was missing: ${lastValidationError.fields.join(', ') || 'one or more required fields'}. This time you MUST include every single field listed in the tool's schema with no omissions, even if some values need to be a bit shorter to fit. Do not skip any required field.`;
 
-    const seg = toolUse.input;
+      const started = Date.now();
+      const response = await anthropic.messages.create({
+        model: MODEL,
+        max_tokens: maxTokens,
+        system: SYSTEM_PROMPT + SEGMENTED_SYSTEM_ADDENDUM,
+        tools: [tool],
+        tool_choice: { type: 'tool', name: 'submit_movie_segment' },
+        messages: [{ role: 'user', content: userPrompt }],
+      }, { timeout: requestTimeoutMs, maxRetries: 0 }); // see the maxRetries comment in /api/generate above
 
-    const requiredArrays = ['characters', 'locations', 'storyboard', 'voiceover'];
-    const missing = requiredArrays.filter((f) => !Array.isArray(seg[f]) || seg[f].length === 0);
-    if (missing.length > 0) {
-      return res.status(502).json({
-        error: `Claude ສົ່ງພາກນີ້ກັບມາບໍ່ຄົບ (ຂາດ: ${missing.join(', ')}). ລອງກົດ Generate ພາກນີ້ໃໝ່ອີກຄັ້ງ.`,
-      });
-    }
-    if (seg.storyboard.length !== SEGMENT_SCENES_PER_PART || seg.voiceover.length !== SEGMENT_SCENES_PER_PART) {
-      return res.status(502).json({
-        error: `Claude ສ້າງຈຳນວນສາກບໍ່ຖືກຕ້ອງ (ໄດ້ storyboard=${seg.storyboard.length}, voiceover=${seg.voiceover.length}, ຕ້ອງການ ${SEGMENT_SCENES_PER_PART} ອັນລະ). ລອງກົດ Generate ພາກນີ້ໃໝ່ອີກຄັ້ງ.`,
-      });
-    }
-    if (!hasStoryBible) {
-      const bibleFields = ['title', 'logline', 'theme', 'artStyle', 'act1', 'act2', 'act3', 'posters', 'social', 'audio'];
-      const missingBible = bibleFields.filter((f) => {
-        const v = seg[f];
-        return v === undefined || v === null || (Array.isArray(v) && v.length === 0);
-      });
-      if (missingBible.length > 0) {
+      console.log(`[generate-segment] attempt ${attempt}: Claude responded in ${((Date.now() - started) / 1000).toFixed(1)}s (stop_reason=${response.stop_reason}, max_tokens=${maxTokens})`);
+      recordUsage(response.usage); // every attempt costs real tokens, whether or not it passes validation
+
+      if (response.stop_reason === 'max_tokens') {
         return res.status(502).json({
-          error: `Claude ສ້າງໂຄງເລື່ອງ (story bible) ບໍ່ຄົບ (ຂາດ: ${missingBible.join(', ')}). ລອງກົດ Generate ພາກນີ້ໃໝ່ອີກຄັ້ງ.`,
+          error: `Claude ໃຊ້ພື້ນທີ່ຄຳຕອບໝົດກ່ອນຈະສ້າງພາກນີ້ສຳເລັດ (output length limit reached). ລອງກົດ Generate ພາກນີ້ໃໝ່ອີກຄັ້ງ.`,
+        });
+      }
+
+      const toolUse = response.content.find((block) => block.type === 'tool_use' && block.name === 'submit_movie_segment');
+      if (!toolUse) {
+        return res.status(502).json({ error: 'Claude did not return a structured segment. Please try again.' });
+      }
+
+      const candidate = toolUse.input;
+      const validationError = validateSegment(candidate);
+      if (!validationError) {
+        seg = candidate;
+      } else if (attempt < MAX_SEGMENT_ATTEMPTS) {
+        console.warn(`[generate-segment] attempt ${attempt}/${MAX_SEGMENT_ATTEMPTS} incomplete (${validationError.message}) — auto-retrying with a sharper prompt`);
+        lastValidationError = validationError;
+      } else {
+        return res.status(502).json({
+          error: `${validationError.message} (ລອງອັດຕະໂນມັດແລ້ວທັງໝົດ ${MAX_SEGMENT_ATTEMPTS} ຄັ້ງ ແຕ່ຍັງຄືເກົ່າ) ອັນນີ້ອາດແມ່ນໄອເດຍເລື່ອງສັບຊ້ອນເກີນໄປສຳລັບພາກດຽວ — ລອງຫຍໍ້ຄວາມໃນຊ່ອງ "ເນື້ອເລື່ອງ" ລົງ ຫຼືກົດ Generate ພາກນີ້ໃໝ່ອີກຄັ້ງດ້ວຍຕົນເອງ.`,
         });
       }
     }
@@ -1165,7 +1203,9 @@ app.post('/api/generate-segment', async (req, res) => {
       pkg: JSON.parse(JSON.stringify(pkg)),
     });
 
-    recordUsage(response.usage);
+    // Usage was already recorded per-attempt inside the retry loop above
+    // (every call to Claude costs tokens whether or not it passed
+    // validation), so just read back the running total here.
     pkg._usage = getUsageSummary();
 
     res.json(pkg);
