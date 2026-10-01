@@ -256,6 +256,74 @@ app.use((req, res, next) => {
 // ---------------------------------------------------------------------------
 const ALLOWED_IMAGE_MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
+// Shared by every "revise from reference image" route below: checks the
+// uploaded image's type and (roughly) its size before it's ever sent to
+// Claude. Returns an {status, error} object to respond with, or null when OK.
+function validateImagePayload(imageBase64, imageMediaType) {
+  if (!imageBase64 || typeof imageBase64 !== 'string') {
+    return { status: 400, error: 'A reference image is required.' };
+  }
+  if (!ALLOWED_IMAGE_MEDIA_TYPES.includes(imageMediaType)) {
+    return { status: 400, error: `Unsupported image type "${imageMediaType}" — use JPEG, PNG, WEBP, or GIF.` };
+  }
+  // Rough cap on the decoded image size (base64 is ~4/3 the original byte
+  // size) so one request can't tie up the server with a huge upload — the
+  // frontend already downscales before sending, so a legitimate photo
+  // should never get near this.
+  if (imageBase64.length > 7_000_000) {
+    return { status: 413, error: 'Reference image is too large. Please use a smaller image.' };
+  }
+  return null;
+}
+
+// Shared by every "revise from reference image" route: sends one vision call
+// forcing the given tool, and — since a tool schema's `required` list is only
+// a strong hint, not a guarantee (see the identical reasoning on the segment
+// endpoint above) — auto-retries once with a sharper prompt if the response
+// comes back missing one of `requiredFields`. Throws an Error whose `.code`
+// is 'MAX_TOKENS', 'NO_TOOL_USE', or 'MISSING_FIELDS' (with `.fields`) so the
+// calling route can turn it into the right Lao message; any other throw is a
+// genuine Anthropic SDK/network error for the caller's own catch block.
+async function callVisionRevisionTool({ tool, requiredFields, systemPrompt, buildUserText, imageBase64, imageMediaType, maxTokens, requestTimeoutMs }) {
+  const MAX_ATTEMPTS = 2;
+  let lastMissing = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const userText = buildUserText(lastMissing);
+    const response = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      tools: [tool],
+      tool_choice: { type: 'tool', name: tool.name },
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: userText },
+          { type: 'image', source: { type: 'base64', media_type: imageMediaType, data: imageBase64 } },
+        ],
+      }],
+    }, { timeout: requestTimeoutMs, maxRetries: 0 }); // see the maxRetries comment on /api/generate above
+
+    recordUsage(response.usage);
+
+    if (response.stop_reason === 'max_tokens') {
+      throw Object.assign(new Error('Claude ran out of response space.'), { code: 'MAX_TOKENS' });
+    }
+    const toolUse = response.content.find((block) => block.type === 'tool_use' && block.name === tool.name);
+    if (!toolUse) {
+      throw Object.assign(new Error('Claude did not return a structured response.'), { code: 'NO_TOOL_USE' });
+    }
+    const candidate = toolUse.input;
+    const missing = requiredFields.filter((f) => !candidate[f] || typeof candidate[f] !== 'string' || !candidate[f].trim());
+    if (missing.length === 0) return candidate;
+    if (attempt < MAX_ATTEMPTS) {
+      lastMissing = missing;
+      continue;
+    }
+    throw Object.assign(new Error('Claude keeps leaving fields out.'), { code: 'MISSING_FIELDS', fields: missing });
+  }
+}
+
 function buildCharacterRevisionTool() {
   return {
     name: 'submit_character_revision',
@@ -288,19 +356,8 @@ app.post('/api/revise-character', express.json({ limit: '6mb' }), async (req, re
     if (!character || typeof character !== 'object' || !character.anchor || !character.visual) {
       return res.status(400).json({ error: 'A character (with existing anchor/visual text) is required.' });
     }
-    if (!imageBase64 || typeof imageBase64 !== 'string') {
-      return res.status(400).json({ error: 'A reference image is required.' });
-    }
-    if (!ALLOWED_IMAGE_MEDIA_TYPES.includes(imageMediaType)) {
-      return res.status(400).json({ error: `Unsupported image type "${imageMediaType}" — use JPEG, PNG, WEBP, or GIF.` });
-    }
-    // Rough cap on the decoded image size (base64 is ~4/3 the original byte
-    // size) so one request can't tie up the server with a huge upload —
-    // the frontend already downscales before sending, so a legitimate photo
-    // should never get near this.
-    if (imageBase64.length > 7_000_000) {
-      return res.status(413).json({ error: 'Reference image is too large. Please use a smaller image.' });
-    }
+    const imageError = validateImagePayload(imageBase64, imageMediaType);
+    if (imageError) return res.status(imageError.status).json({ error: imageError.error });
 
     const originalArTag = (character.anchor.match(/--ar\s+\S+/) || [])[0] || '';
     const tool = buildCharacterRevisionTool();
@@ -314,47 +371,23 @@ app.post('/api/revise-character', express.json({ limit: '6mb' }), async (req, re
 
 The creator has attached a reference image showing how they actually want this character to look (for example, a test render that came out wrong, or a face/style they want to match). Study the attached image carefully and rewrite BOTH fields so they faithfully match what's shown in the image, while keeping this character's name, age, and story role unchanged. Keep the anchor prompt in the same rich, standardized style as the original (same level of detail, same kind of phrasing for use with Midjourney/Flux/etc.), and end it with the exact same aspect ratio tag the original had${originalArTag ? ` ("${originalArTag}")` : ''}.${notes && String(notes).trim() ? `\n\nThe creator also specifically asked for: "${String(notes).trim()}"` : ''}`;
 
-    const MAX_ATTEMPTS = 2;
-    let revised = null;
-    let lastMissing = null;
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS && !revised; attempt++) {
-      const userText = attempt === 1
-        ? baseUserText
-        : `${baseUserText}\n\nIMPORTANT: Your previous attempt was missing: ${lastMissing.join(', ')}. This time you MUST include both "visual" and "anchor" as non-empty strings.`;
-
-      const response = await anthropic.messages.create({
-        model: MODEL,
-        max_tokens: 1500,
-        system: 'You are a meticulous visual continuity assistant for an AI film production tool. You analyze a reference image and translate it into precise, reusable text-to-image prompt language.',
-        tools: [tool],
-        tool_choice: { type: 'tool', name: 'submit_character_revision' },
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'text', text: userText },
-            { type: 'image', source: { type: 'base64', media_type: imageMediaType, data: imageBase64 } },
-          ],
-        }],
-      }, { timeout: 90 * 1000, maxRetries: 0 }); // see the maxRetries comment on /api/generate above
-
-      recordUsage(response.usage);
-
-      if (response.stop_reason === 'max_tokens') {
-        return res.status(502).json({ error: 'Claude ໃຊ້ພື້ນທີ່ຄຳຕອບໝົດກ່ອນຈະແກ້ໄຂສຳເລັດ. ລອງໃໝ່ອີກຄັ້ງ.' });
-      }
-      const toolUse = response.content.find((block) => block.type === 'tool_use' && block.name === 'submit_character_revision');
-      if (!toolUse) {
-        return res.status(502).json({ error: 'Claude did not return a structured revision. Please try again.' });
-      }
-      const candidate = toolUse.input;
-      const missing = ['visual', 'anchor'].filter((f) => !candidate[f] || typeof candidate[f] !== 'string' || !candidate[f].trim());
-      if (missing.length === 0) {
-        revised = candidate;
-      } else if (attempt < MAX_ATTEMPTS) {
-        lastMissing = missing;
-      } else {
-        return res.status(502).json({ error: `Claude ຕອບກັບມາບໍ່ຄົບ (ຂາດ: ${missing.join(', ')}). ລອງໃໝ່ອີກຄັ້ງ.` });
-      }
+    let revised;
+    try {
+      revised = await callVisionRevisionTool({
+        tool,
+        requiredFields: ['visual', 'anchor'],
+        systemPrompt: 'You are a meticulous visual continuity assistant for an AI film production tool. You analyze a reference image and translate it into precise, reusable text-to-image prompt language.',
+        buildUserText: (missing) => !missing ? baseUserText : `${baseUserText}\n\nIMPORTANT: Your previous attempt was missing: ${missing.join(', ')}. This time you MUST include both "visual" and "anchor" as non-empty strings.`,
+        imageBase64,
+        imageMediaType,
+        maxTokens: 1500,
+        requestTimeoutMs: 90 * 1000,
+      });
+    } catch (err) {
+      if (err.code === 'MAX_TOKENS') return res.status(502).json({ error: 'Claude ໃຊ້ພື້ນທີ່ຄຳຕອບໝົດກ່ອນຈະແກ້ໄຂສຳເລັດ. ລອງໃໝ່ອີກຄັ້ງ.' });
+      if (err.code === 'NO_TOOL_USE') return res.status(502).json({ error: 'Claude did not return a structured revision. Please try again.' });
+      if (err.code === 'MISSING_FIELDS') return res.status(502).json({ error: `Claude ຕອບກັບມາບໍ່ຄົບ (ຂາດ: ${err.fields.join(', ')}). ລອງໃໝ່ອີກຄັ້ງ.` });
+      throw err;
     }
 
     // Safety net: if Claude's new anchor somehow dropped the aspect-ratio
@@ -367,6 +400,85 @@ The creator has attached a reference image showing how they actually want this c
     res.json({ visual: revised.visual, anchor: revised.anchor, _usage: getUsageSummary() });
   } catch (err) {
     console.error('[revise-character] error:', err);
+    res.status(err && err.status ? err.status : 500).json({ error: describeAnthropicError(err) });
+  }
+});
+
+// Generic single-field version of the above, for every OTHER prompt box that
+// now has an "upload a reference image" button: one storyboard scene's image
+// prompt, one location's background prompt, one poster's image prompt, or
+// one audio (music/SFX) prompt. `context` is a short description the
+// frontend sends explaining what kind of prompt this is and any scene/
+// location-specific detail, so Claude has enough to work with without the
+// server needing to know about every tab's data shape.
+function buildPromptRevisionTool() {
+  return {
+    name: 'submit_prompt_revision',
+    description: "Submit the revised prompt text, updated to match the creator's reference image.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'The revised prompt text.' },
+      },
+      required: ['text'],
+    },
+  };
+}
+
+app.post('/api/revise-prompt', express.json({ limit: '6mb' }), async (req, res) => {
+  try {
+    if (!checkRateLimit(req.ip)) {
+      return res.status(429).json({
+        error: `Rate limit reached (max ${RATE_LIMIT_MAX} generations/hour per visitor). Try again later.`,
+      });
+    }
+    if (!apiKey) {
+      return res.status(500).json({
+        error: 'No Anthropic API key is set yet. Use the "API Key" button at the top of the page to paste one in — no restart needed.',
+      });
+    }
+
+    const { currentText, context, preserveArTag, notes, imageBase64, imageMediaType } = req.body || {};
+    if (!currentText || typeof currentText !== 'string' || !currentText.trim()) {
+      return res.status(400).json({ error: 'An existing prompt to revise is required.' });
+    }
+    const imageError = validateImagePayload(imageBase64, imageMediaType);
+    if (imageError) return res.status(imageError.status).json({ error: imageError.error });
+
+    const originalArTag = preserveArTag ? (currentText.match(/--ar\s+\S+/) || [])[0] || '' : '';
+    const tool = buildPromptRevisionTool();
+
+    const baseUserText = `Here is an existing prompt from an AI-movie production package:
+${context ? `Context: ${context}\n` : ''}Current prompt: "${currentText}"
+
+The creator has attached a reference image showing what they actually want (for example, a test render that came out wrong, or a mood/style/location photo they want to match). Study the attached image carefully and rewrite the prompt so it faithfully matches what's shown in the image, while keeping the same purpose and the same rich, standardized level of detail as the original.${originalArTag ? ` End it with the exact same aspect ratio tag the original had ("${originalArTag}").` : ''}${notes && String(notes).trim() ? `\n\nThe creator also specifically asked for: "${String(notes).trim()}"` : ''}`;
+
+    let revised;
+    try {
+      revised = await callVisionRevisionTool({
+        tool,
+        requiredFields: ['text'],
+        systemPrompt: 'You are a meticulous prompt-engineering assistant for an AI film production tool. You analyze a reference image and translate it into precise, reusable text-to-image (or audio) prompt language.',
+        buildUserText: (missing) => !missing ? baseUserText : `${baseUserText}\n\nIMPORTANT: Your previous attempt returned an empty/missing "text" field. This time you MUST include it as a non-empty string.`,
+        imageBase64,
+        imageMediaType,
+        maxTokens: 800,
+        requestTimeoutMs: 75 * 1000,
+      });
+    } catch (err) {
+      if (err.code === 'MAX_TOKENS') return res.status(502).json({ error: 'Claude ໃຊ້ພື້ນທີ່ຄຳຕອບໝົດກ່ອນຈະແກ້ໄຂສຳເລັດ. ລອງໃໝ່ອີກຄັ້ງ.' });
+      if (err.code === 'NO_TOOL_USE') return res.status(502).json({ error: 'Claude did not return a structured revision. Please try again.' });
+      if (err.code === 'MISSING_FIELDS') return res.status(502).json({ error: 'Claude ຕອບກັບມາບໍ່ຄົບ. ລອງໃໝ່ອີກຄັ້ງ.' });
+      throw err;
+    }
+
+    if (originalArTag && !/--ar\s+\S+/.test(revised.text)) {
+      revised.text = `${revised.text.trim()} ${originalArTag}`;
+    }
+
+    res.json({ text: revised.text, _usage: getUsageSummary() });
+  } catch (err) {
+    console.error('[revise-prompt] error:', err);
     res.status(err && err.status ? err.status : 500).json({ error: describeAnthropicError(err) });
   }
 });
