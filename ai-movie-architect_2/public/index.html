@@ -804,12 +804,21 @@
         };
 
         window.onload = function() {
+            // Try to pick up where the last session left off (see
+            // saveSessionLocal/restoreSessionLocal above) before anything
+            // renders or stashes the built-in sample project.
+            const restored = restoreSessionLocal();
+            if (!restored) {
+                standardProject = currentProject; // the built-in sample, so switching modes and back restores it
+            }
+            applyModeVisuals(generationMode); // reflects a restored segmented session's UI correctly; a no-op for the default standard mode
+            if (generationMode === 'segmented') renderSegmentPartButtons();
             renderAllTabs();
             checkApiStatus(true); // auto-open the key setup modal on first run if no key is saved yet
             fetchUsage();
             updateDurationHint();
-            standardProject = currentProject; // the built-in sample, so switching modes and back restores it
             updateGenerateButtonLabel();
+            if (restored) showToast('ໂຫຼດວຽກທີ່ເຮັດຄ້າງໄວ້ລ່າສຸດກັບມາແລ້ວ');
         };
 
         // Mirrors the server's getSceneCount() parsing so the client can size its
@@ -987,6 +996,65 @@ async function checkApiStatus(openModalIfMissing) {
                 pkg,
             });
             saveHistoryArray(arr.slice(0, HISTORY_MAX_ITEMS_CLIENT));
+        }
+
+        // ---------------------------------------------------------------------
+        // Current-project autosave (separate from Generation History above).
+        // History only captures a *snapshot* at the moment each Generate
+        // finishes — it does NOT update when you later revise a prompt from a
+        // reference image, add/remove a scene, or switch between standard and
+        // segmented mode. Without this, closing the tab (or the server
+        // spinning down and the page reloading) would silently throw away any
+        // of that in-progress work and bring back the built-in sample movie
+        // instead. This mirrors the same "save render-ready state straight
+        // into the browser" approach as History, just for the single
+        // currently-open project (both modes) instead of a growing list.
+        // ---------------------------------------------------------------------
+        const SESSION_STORAGE_KEY = 'ai_movie_architect_session_v1';
+
+        function saveSessionLocal() {
+            try {
+                // Mirror the same stash setGenerationMode() does when
+                // switching modes, so whichever project is on screen right
+                // now is filed under the mode it actually belongs to before
+                // snapshotting both.
+                if (isSegmentedProject(currentProject)) segmentedProject = currentProject; else standardProject = currentProject;
+                localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
+                    generationMode, selectedSegmentPart, standardProject, segmentedProject,
+                }));
+            } catch (e) {
+                // Quota exceeded or privacy-mode localStorage -- this is a
+                // convenience layer on top of the explicit Generation
+                // History above, so fail silently rather than interrupting
+                // the user's work with an error they can't act on.
+                console.error('[session] autosave failed (continuing without it):', e);
+            }
+        }
+
+        // Called once, at page load, BEFORE the first renderAllTabs() --
+        // otherwise that first render would immediately overwrite any saved
+        // session with the built-in sample project. Returns true if a saved
+        // session was found and restored.
+        function restoreSessionLocal() {
+            try {
+                const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+                if (!raw) return false;
+                const saved = JSON.parse(raw);
+                if (!saved || typeof saved !== 'object') return false;
+
+                if (saved.standardProject && typeof saved.standardProject === 'object') standardProject = saved.standardProject;
+                if (saved.segmentedProject && typeof saved.segmentedProject === 'object') segmentedProject = saved.segmentedProject;
+                if (saved.generationMode === 'segmented' || saved.generationMode === 'standard') generationMode = saved.generationMode;
+                if (saved.selectedSegmentPart) selectedSegmentPart = saved.selectedSegmentPart;
+
+                currentProject = generationMode === 'segmented'
+                    ? (segmentedProject || makeEmptySegmentedShell())
+                    : (standardProject || currentProject);
+                return true;
+            } catch (e) {
+                console.error('[session] could not restore saved session, starting fresh:', e);
+                return false;
+            }
         }
 
         function openHistoryModal() {
@@ -1337,12 +1405,15 @@ async function checkApiStatus(openModalIfMissing) {
             document.getElementById('socialHashtags').innerText = currentProject.social.hashtags;
             document.getElementById('socialKeywords').innerText = currentProject.social.keywords;
 
-            // 8. Audio Tab
+            // 8. Audio Tab — the one surface with NO reference-image upload:
+            // Claude's API can see a picture but can't listen to a sound
+            // file, so revising an audio/SFX prompt here works from a typed
+            // description instead (see textRevisionWidgetHtml below).
             currentProject.audio.forEach((a, ai) => {
                 promptRevisionSpecs['audio-' + ai] = {
                     getText: () => currentProject.audio[ai].prompt,
                     setText: (t) => { currentProject.audio[ai].prompt = t; },
-                    context: `${a.type} prompt for Suno/Udio/SFX generation. The reference image shows the mood, scene, or style this audio should match.`,
+                    context: `${a.type} prompt for Suno/Udio/SFX generation.`,
                     preserveArTag: false,
                 };
             });
@@ -1356,7 +1427,7 @@ async function checkApiStatus(openModalIfMissing) {
                     <button onclick="navigator.clipboard.writeText('${a.prompt.replace(/'/g, "\\'")}')" class="text-xs text-indigo-400 hover:underline flex items-center gap-1">
                         <i class="ph-bold ph-copy"></i> Copy Audio Prompt
                     </button>
-                    ${imgRevisionWidgetHtml('audio-' + ai, `revisePromptFromImage('audio-${ai}')`)}
+                    ${textRevisionWidgetHtml('audio-' + ai, `reviseTextPromptFromDescription('audio-${ai}')`)}
                 </div>
             `).join('');
 
@@ -1405,6 +1476,15 @@ async function checkApiStatus(openModalIfMissing) {
                     <button onclick="navigator.clipboard.writeText('${a.prompt.replace(/'/g, "\\'")}')" class="text-[10px] text-indigo-400 hover:underline flex-shrink-0"><i class="ph-bold ph-copy"></i></button>
                 </div>
             `).join('');
+
+            // Every mutation to currentProject in this app (a new generation,
+            // a segment merge, an image/description-based revision, adding
+            // or removing a scene, switching modes) is always followed by a
+            // call to renderAllTabs() to refresh the screen -- so hooking the
+            // autosave here, instead of duplicating a save call at every one
+            // of those call sites, guarantees nothing falls through the
+            // cracks. See saveSessionLocal()/restoreSessionLocal() below.
+            saveSessionLocal();
         }
 
         // Real generation can now legitimately take several minutes (see the
@@ -1788,6 +1868,23 @@ async function checkApiStatus(openModalIfMissing) {
             showToast('ຄັດລອກ Anchor Prompt ແລ້ວ');
         }
 
+        // Text-only counterpart to imgRevisionWidgetHtml(), used only by the
+        // Audio tab. Claude's API can analyze a photo but has no way to
+        // listen to an uploaded sound file or voice recording, so instead of
+        // an (impossible) "upload audio and have Claude listen to it"
+        // widget, the creator just types what they want changed and that
+        // description alone drives the revision — see reviseTextPromptFromDescription().
+        function textRevisionWidgetHtml(id, onclickCall) {
+            return `
+                <div class="pt-2 mt-1 border-t border-slate-800/80 space-y-2">
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-emerald-400">ແກ້ໄຂ Prompt ຈາກຄຳອະທິບາຍ (ບໍ່ຕ້ອງອັບໂຫລດຮູບ/ສຽງ)</span>
+                    <textarea id="textNotes-${id}" rows="2" placeholder="ອະທິບາຍວ່າຕ້ອງການປ່ຽນຫຍັງ (ເຊັ່ນ: ໃຫ້ຈັງຫວະໄວຂຶ້ນ, ມືດ/ໜັກຂຶ້ນ, ປ່ຽນເຄື່ອງດົນຕີ)" class="w-full text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-950/80 border border-slate-800 text-slate-200 placeholder-slate-600 resize-none"></textarea>
+                    <button onclick="${onclickCall}" id="textReviseBtn-${id}" class="text-[11px] w-full py-1.5 rounded-lg bg-emerald-700/80 hover:bg-emerald-600 text-white font-semibold transition flex items-center justify-center gap-1.5">
+                        <i class="ph-bold ph-magic-wand"></i> ແກ້ໄຂ Prompt ຕາມຄຳອະທິບາຍ
+                    </button>
+                </div>`;
+        }
+
         // Downscales + re-encodes the picked image client-side before upload:
         // keeps the request small/fast and the vision-call cost low, and
         // avoids the (unlikely but real) chance of a huge phone photo
@@ -1987,6 +2084,73 @@ async function checkApiStatus(openModalIfMissing) {
                 renderAllTabs();
                 if (data._usage) renderUsage(data._usage); else fetchUsage();
                 showToast('ແກ້ໄຂ Prompt ຕາມຮູບສຳເລັດແລ້ວ!');
+            } catch (err) {
+                showToast('ເກີດຂໍ້ຜິດພາດ: ' + err.message, true);
+            } finally {
+                clearTimeout(timeoutId);
+                btn.disabled = false;
+                btn.innerHTML = originalBtnHtml;
+            }
+        }
+
+        // Audio-tab counterpart to revisePromptFromImage() — no image draft
+        // involved at all, since that tab has no upload step. Reads the
+        // typed description straight from the textarea at submit time (no
+        // intermediate "draft" object needed, since there's nothing to
+        // preview before pressing the button).
+        async function reviseTextPromptFromDescription(id) {
+            const spec = promptRevisionSpecs[id];
+            if (!spec) { showToast('ເກີດຂໍ້ຜິດພາດພາຍໃນ', true); return; }
+            const notesEl = document.getElementById(`textNotes-${id}`);
+            const notes = ((notesEl && notesEl.value) || '').trim();
+            if (!notes) {
+                showToast('ກະລຸນາອະທິບາຍວ່າຕ້ອງການປ່ຽນຫຍັງກ່ອນ', true);
+                return;
+            }
+            const currentText = spec.getText();
+            if (!currentText || !String(currentText).trim()) {
+                showToast('ບໍ່ພົບ Prompt ເດີມທີ່ຈະແກ້ໄຂ', true);
+                return;
+            }
+            const btn = document.getElementById(`textReviseBtn-${id}`);
+            const originalBtnHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="ph-bold ph-circle-notch spin"></i> ກຳລັງແກ້ໄຂ...';
+
+            // Lighter guard than the vision flows above (90s/3min) since
+            // there's no image for Claude to process here — just text in,
+            // text out.
+            const controller = new AbortController();
+            const timeoutMs = 2 * 60 * 1000;
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+            try {
+                let res;
+                try {
+                    res = await fetch('/api/revise-prompt', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            currentText,
+                            context: spec.context,
+                            preserveArTag: !!spec.preserveArTag,
+                            notes,
+                        }),
+                        signal: controller.signal,
+                    });
+                } catch (networkErr) {
+                    if (networkErr.name === 'AbortError') {
+                        throw new Error('ໝົດເວລາ (timed out) ລໍຖ້າ Claude. ລອງໃໝ່ອີກຄັ້ງ.');
+                    }
+                    throw new Error('ຕິດຕໍ່ server ບໍ່ໄດ້ (network error: ' + networkErr.message + ').');
+                }
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Revision failed (HTTP ' + res.status + ')');
+
+                spec.setText(data.text);
+                renderAllTabs();
+                if (data._usage) renderUsage(data._usage); else fetchUsage();
+                showToast('ແກ້ໄຂ Prompt ຕາມຄຳອະທິບາຍສຳເລັດແລ້ວ!');
             } catch (err) {
                 showToast('ເກີດຂໍ້ຜິດພາດ: ' + err.message, true);
             } finally {
