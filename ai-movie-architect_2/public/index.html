@@ -1235,27 +1235,19 @@ async function checkApiStatus(openModalIfMissing) {
                         </div>
                         <p class="text-[11px] text-slate-400 font-mono bg-slate-950/80 p-2 rounded-lg border border-slate-800 leading-normal select-all" id="charAnchorText-${i}">${escapeHtml(c.anchor)}</p>
                     </div>
-                    <div class="pt-2 border-t border-slate-800/80 space-y-2">
-                        <span class="text-[10px] font-bold uppercase tracking-wider text-emerald-400">ແກ້ໄຂ Prompt ຈາກຮູບຕົວຢ່າງ (Reference Image)</span>
-                        <div class="flex items-center gap-2">
-                            <label class="text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 cursor-pointer transition flex items-center gap-1.5 flex-shrink-0">
-                                <i class="ph-bold ph-image"></i> ອັບໂຫລດຮູບ
-                                <input type="file" accept="image/*" class="hidden" onchange="handleCharacterImageSelected(${i}, this)">
-                            </label>
-                            <img id="charImgPreview-${i}" class="hidden h-9 w-9 object-cover rounded-lg border border-slate-700 flex-shrink-0" />
-                            <span id="charImgFileName-${i}" class="text-[10px] text-slate-500 truncate"></span>
-                        </div>
-                        <div id="charImgReviseRow-${i}" class="hidden space-y-1.5">
-                            <input type="text" id="charImgNotes-${i}" placeholder="ຕ້ອງການປ່ຽນຫຍັງ (ບໍ່ບັງຄັບ, ເຊັ່ນ: ຜົມສັ້ນກວ່ານີ້)" class="w-full text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-950/80 border border-slate-800 text-slate-200 placeholder-slate-600">
-                            <button onclick="reviseCharacterFromImage(${i})" id="charImgReviseBtn-${i}" class="text-[11px] w-full py-1.5 rounded-lg bg-emerald-700/80 hover:bg-emerald-600 text-white font-semibold transition flex items-center justify-center gap-1.5">
-                                <i class="ph-bold ph-magic-wand"></i> ແກ້ໄຂ Prompt ຕາມຮູບນີ້
-                            </button>
-                        </div>
-                    </div>
+                    ${imgRevisionWidgetHtml('char-' + i, `reviseCharacterFromImage(${i})`)}
                 </div>
             `).join('');
 
             // 4. Storyboard Tab
+            currentProject.storyboard.forEach((sb, idx) => {
+                promptRevisionSpecs['scene-' + idx] = {
+                    getText: () => currentProject.storyboard[idx].imagePrompt,
+                    setText: (t) => { currentProject.storyboard[idx].imagePrompt = t; },
+                    context: `Scene ${sb.scene} image prompt for an AI-generated storyboard. Scene description: "${sb.desc}"`,
+                    preserveArTag: true,
+                };
+            });
             const sbBox = document.getElementById('storyboardContainer');
             sbBox.innerHTML = currentProject.storyboard.map((sb, idx) => `
                 <div class="p-4 bg-slate-900/60 rounded-xl border border-slate-800 space-y-3">
@@ -1275,6 +1267,7 @@ async function checkApiStatus(openModalIfMissing) {
                                 <button onclick="navigator.clipboard.writeText('${sb.imagePrompt.replace(/'/g, "\\'")}')" class="text-[10px] text-indigo-400 hover:underline">Copy</button>
                             </div>
                             <p class="text-[11px] text-slate-300 font-mono select-all leading-relaxed">${sb.imagePrompt}</p>
+                            ${imgRevisionWidgetHtml('scene-' + idx, `revisePromptFromImage('scene-${idx}')`)}
                         </div>
 
                         <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800 space-y-1">
@@ -1289,8 +1282,16 @@ async function checkApiStatus(openModalIfMissing) {
             `).join('');
 
             // 5. Locations Tab
+            currentProject.locations.forEach((l, li) => {
+                promptRevisionSpecs['loc-' + li] = {
+                    getText: () => currentProject.locations[li].prompt,
+                    setText: (t) => { currentProject.locations[li].prompt = t; },
+                    context: `Background/set image prompt for the location "${l.name}". Location description: "${l.desc}"`,
+                    preserveArTag: true,
+                };
+            });
             const locBox = document.getElementById('locationList');
-            locBox.innerHTML = currentProject.locations.map(l => `
+            locBox.innerHTML = currentProject.locations.map((l, li) => `
                 <div class="p-4 bg-slate-900/60 rounded-xl border border-slate-800 space-y-2">
                     <h4 class="font-bold text-slate-100 text-sm">${l.name}</h4>
                     <p class="text-xs text-slate-300">${l.desc}</p>
@@ -1301,12 +1302,21 @@ async function checkApiStatus(openModalIfMissing) {
                         </div>
                         <p class="text-[11px] text-slate-300 font-mono select-all">${l.prompt}</p>
                     </div>
+                    ${imgRevisionWidgetHtml('loc-' + li, `revisePromptFromImage('loc-${li}')`)}
                 </div>
             `).join('');
 
             // 6. Posters Tab
+            currentProject.posters.forEach((p, pi) => {
+                promptRevisionSpecs['poster-' + pi] = {
+                    getText: () => currentProject.posters[pi].prompt,
+                    setText: (t) => { currentProject.posters[pi].prompt = t; },
+                    context: `Movie poster image prompt titled "${p.title}". Text overlay: "${p.textOverlay}"`,
+                    preserveArTag: true,
+                };
+            });
             const posterBox = document.getElementById('posterContainer');
-            posterBox.innerHTML = currentProject.posters.map(p => `
+            posterBox.innerHTML = currentProject.posters.map((p, pi) => `
                 <div class="p-4 bg-slate-900/60 rounded-xl border border-slate-800 space-y-2">
                     <h4 class="font-bold text-slate-100 text-sm">${p.title}</h4>
                     <p class="text-xs text-amber-300"><strong>Text Overlay:</strong> ${p.textOverlay}</p>
@@ -1317,6 +1327,7 @@ async function checkApiStatus(openModalIfMissing) {
                         </div>
                         <p class="text-[11px] text-slate-300 font-mono select-all leading-relaxed">${p.prompt}</p>
                     </div>
+                    ${imgRevisionWidgetHtml('poster-' + pi, `revisePromptFromImage('poster-${pi}')`)}
                 </div>
             `).join('');
 
@@ -1327,8 +1338,16 @@ async function checkApiStatus(openModalIfMissing) {
             document.getElementById('socialKeywords').innerText = currentProject.social.keywords;
 
             // 8. Audio Tab
+            currentProject.audio.forEach((a, ai) => {
+                promptRevisionSpecs['audio-' + ai] = {
+                    getText: () => currentProject.audio[ai].prompt,
+                    setText: (t) => { currentProject.audio[ai].prompt = t; },
+                    context: `${a.type} prompt for Suno/Udio/SFX generation. The reference image shows the mood, scene, or style this audio should match.`,
+                    preserveArTag: false,
+                };
+            });
             const audioBox = document.getElementById('audioContainer');
-            audioBox.innerHTML = currentProject.audio.map(a => `
+            audioBox.innerHTML = currentProject.audio.map((a, ai) => `
                 <div class="p-4 bg-slate-900/60 rounded-xl border border-slate-800 space-y-2">
                     <h4 class="font-bold text-amber-300 text-xs uppercase tracking-wider">${a.type}</h4>
                     <div class="bg-slate-950/80 p-3 rounded-lg border border-slate-800">
@@ -1337,6 +1356,7 @@ async function checkApiStatus(openModalIfMissing) {
                     <button onclick="navigator.clipboard.writeText('${a.prompt.replace(/'/g, "\\'")}')" class="text-xs text-indigo-400 hover:underline flex items-center gap-1">
                         <i class="ph-bold ph-copy"></i> Copy Audio Prompt
                     </button>
+                    ${imgRevisionWidgetHtml('audio-' + ai, `revisePromptFromImage('audio-${ai}')`)}
                 </div>
             `).join('');
 
@@ -1718,7 +1738,48 @@ async function checkApiStatus(openModalIfMissing) {
         // character's visual description + image-generation anchor prompt to
         // match it, without re-running the whole generation.
         // ---------------------------------------------------------------------
-        const characterImageDrafts = {}; // { [charIndex]: { base64, mediaType, fileName } }, kept in memory only — not persisted or sent anywhere until "ແກ້ໄຂ Prompt" is pressed
+        // Keyed by a string id unique to whatever card the picker is on —
+        // "char-2", "scene-5", "loc-0", "poster-1", "audio-0" — so one shared
+        // store/handler covers every "upload a reference image" button in the
+        // app instead of a separate copy per tab. Kept in memory only, never
+        // persisted or sent anywhere until "ແກ້ໄຂ Prompt" is pressed for that id.
+        const imageDrafts = {};
+
+        // For the four single-field surfaces (storyboard scenes, locations,
+        // posters, audio), renderAllTabs() below (re)registers one entry per
+        // card under the same id scheme, telling the generic
+        // revisePromptFromImage() how to read/write that card's text and
+        // what to tell Claude it's looking at. The character card is NOT
+        // registered here — it has its own two-field (visual+anchor) flow,
+        // reviseCharacterFromImage(), because it also needs to propagate a
+        // changed anchor into already-generated scenes (see that function).
+        const promptRevisionSpecs = {};
+
+        // Shared markup for every "upload a reference image to revise this
+        // prompt" button, parameterized by a unique id (see imageDrafts
+        // above) and the onclick call to run when "ແກ້ໄຂ Prompt" is pressed —
+        // reviseCharacterFromImage(i) for the character card, or
+        // revisePromptFromImage('<id>') for everything else.
+        function imgRevisionWidgetHtml(id, onclickCall) {
+            return `
+                <div class="pt-2 mt-1 border-t border-slate-800/80 space-y-2">
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-emerald-400">ແກ້ໄຂ Prompt ຈາກຮູບຕົວຢ່າງ (Reference Image)</span>
+                    <div class="flex items-center gap-2">
+                        <label class="text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 cursor-pointer transition flex items-center gap-1.5 flex-shrink-0">
+                            <i class="ph-bold ph-image"></i> ອັບໂຫລດຮູບ
+                            <input type="file" accept="image/*" class="hidden" onchange="handleImageSelected('${id}', this)">
+                        </label>
+                        <img id="imgPreview-${id}" class="hidden h-9 w-9 object-cover rounded-lg border border-slate-700 flex-shrink-0" />
+                        <span id="imgFileName-${id}" class="text-[10px] text-slate-500 truncate"></span>
+                    </div>
+                    <div id="imgReviseRow-${id}" class="hidden space-y-1.5">
+                        <input type="text" id="imgNotes-${id}" placeholder="ຕ້ອງການປ່ຽນຫຍັງ (ບໍ່ບັງຄັບ)" class="w-full text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-950/80 border border-slate-800 text-slate-200 placeholder-slate-600">
+                        <button onclick="${onclickCall}" id="imgReviseBtn-${id}" class="text-[11px] w-full py-1.5 rounded-lg bg-emerald-700/80 hover:bg-emerald-600 text-white font-semibold transition flex items-center justify-center gap-1.5">
+                            <i class="ph-bold ph-magic-wand"></i> ແກ້ໄຂ Prompt ຕາມຮູບນີ້
+                        </button>
+                    </div>
+                </div>`;
+        }
 
         function copyCharacterAnchor(i) {
             const c = currentProject.characters[i];
@@ -1758,17 +1819,17 @@ async function checkApiStatus(openModalIfMissing) {
             });
         }
 
-        async function handleCharacterImageSelected(i, inputEl) {
+        async function handleImageSelected(id, inputEl) {
             const file = inputEl.files && inputEl.files[0];
             if (!file) return;
             try {
                 const { base64, mediaType } = await fileToResizedBase64(file, 1024, 0.85);
-                characterImageDrafts[i] = { base64, mediaType, fileName: file.name };
-                const preview = document.getElementById(`charImgPreview-${i}`);
+                imageDrafts[id] = { base64, mediaType, fileName: file.name };
+                const preview = document.getElementById(`imgPreview-${id}`);
                 preview.src = `data:${mediaType};base64,${base64}`;
                 preview.classList.remove('hidden');
-                document.getElementById(`charImgFileName-${i}`).innerText = file.name;
-                document.getElementById(`charImgReviseRow-${i}`).classList.remove('hidden');
+                document.getElementById(`imgFileName-${id}`).innerText = file.name;
+                document.getElementById(`imgReviseRow-${id}`).classList.remove('hidden');
             } catch (err) {
                 showToast('ອ່ານຮູບບໍ່ໄດ້: ' + err.message, true);
             } finally {
@@ -1777,15 +1838,16 @@ async function checkApiStatus(openModalIfMissing) {
         }
 
         async function reviseCharacterFromImage(i) {
-            const draft = characterImageDrafts[i];
+            const id = 'char-' + i;
+            const draft = imageDrafts[id];
             const character = currentProject.characters[i];
             if (!draft || !character) {
                 showToast('ກະລຸນາອັບໂຫລດຮູບກ່ອນ', true);
                 return;
             }
             const oldAnchor = character.anchor; // captured before the request so we can propagate the change below
-            const notes = (document.getElementById(`charImgNotes-${i}`) || {}).value || '';
-            const btn = document.getElementById(`charImgReviseBtn-${i}`);
+            const notes = (document.getElementById(`imgNotes-${id}`) || {}).value || '';
+            const btn = document.getElementById(`imgReviseBtn-${id}`);
             const originalBtnHtml = btn.innerHTML;
             btn.disabled = true;
             btn.innerHTML = '<i class="ph-bold ph-circle-notch spin"></i> ກຳລັງແກ້ໄຂ...';
@@ -1845,7 +1907,7 @@ async function checkApiStatus(openModalIfMissing) {
                     });
                 }
 
-                delete characterImageDrafts[i]; // this character's card is about to be rebuilt fresh by renderAllTabs()
+                delete imageDrafts[id]; // this character's card is about to be rebuilt fresh by renderAllTabs()
                 renderAllTabs(); // refreshes the Characters, Storyboard, and Poster tabs with the propagated text
                 if (data._usage) renderUsage(data._usage); else fetchUsage();
 
@@ -1856,6 +1918,75 @@ async function checkApiStatus(openModalIfMissing) {
                 } else {
                     showToast(`ແກ້ໄຂ Prompt ຂອງ "${character.name}" ຕາມຮູບສຳເລັດແລ້ວ!`);
                 }
+            } catch (err) {
+                showToast('ເກີດຂໍ້ຜິດພາດ: ' + err.message, true);
+            } finally {
+                clearTimeout(timeoutId);
+                btn.disabled = false;
+                btn.innerHTML = originalBtnHtml;
+            }
+        }
+
+        // Generic single-field version of reviseCharacterFromImage(), used by
+        // every surface except the character card (which has two fields —
+        // visual + anchor — plus the anchor-propagation side effect above).
+        // `id` is the same string used to build the widget's DOM ids
+        // (e.g. "scene-3", "loc-0", "poster-1", "audio-2") and to key both
+        // imageDrafts and promptRevisionSpecs.
+        async function revisePromptFromImage(id) {
+            const draft = imageDrafts[id];
+            const spec = promptRevisionSpecs[id];
+            if (!draft || !spec) {
+                showToast('ກະລຸນາອັບໂຫລດຮູບກ່ອນ', true);
+                return;
+            }
+            const currentText = spec.getText();
+            if (!currentText || !String(currentText).trim()) {
+                showToast('ບໍ່ພົບ Prompt ເດີມທີ່ຈະແກ້ໄຂ', true);
+                return;
+            }
+            const notes = (document.getElementById(`imgNotes-${id}`) || {}).value || '';
+            const btn = document.getElementById(`imgReviseBtn-${id}`);
+            const originalBtnHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="ph-bold ph-circle-notch spin"></i> ກຳລັງແກ້ໄຂ...';
+
+            // Same hang-guard pattern as reviseCharacterFromImage(): a single
+            // small vision call, but still a real network round trip.
+            const controller = new AbortController();
+            const timeoutMs = 3 * 60 * 1000;
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+            try {
+                let res;
+                try {
+                    res = await fetch('/api/revise-prompt', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            currentText,
+                            context: spec.context,
+                            preserveArTag: !!spec.preserveArTag,
+                            imageBase64: draft.base64,
+                            imageMediaType: draft.mediaType,
+                            notes,
+                        }),
+                        signal: controller.signal,
+                    });
+                } catch (networkErr) {
+                    if (networkErr.name === 'AbortError') {
+                        throw new Error('ໝົດເວລາ (timed out) ລໍຖ້າ Claude. ລອງໃໝ່ອີກຄັ້ງ.');
+                    }
+                    throw new Error('ຕິດຕໍ່ server ບໍ່ໄດ້ (network error: ' + networkErr.message + ').');
+                }
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Revision failed (HTTP ' + res.status + ')');
+
+                spec.setText(data.text);
+                delete imageDrafts[id]; // this card is about to be rebuilt fresh by renderAllTabs()
+                renderAllTabs();
+                if (data._usage) renderUsage(data._usage); else fetchUsage();
+                showToast('ແກ້ໄຂ Prompt ຕາມຮູບສຳເລັດແລ້ວ!');
             } catch (err) {
                 showToast('ເກີດຂໍ້ຜິດພາດ: ' + err.message, true);
             } finally {
