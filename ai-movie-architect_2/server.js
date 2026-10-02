@@ -340,17 +340,46 @@ async function callVisionRevisionTool({ tool, requiredFields, systemPrompt, buil
   }
 }
 
+// Shared description for the "referenceImagePrompt" field on every character
+// (standard schema, segmented schema, and the revision tool below) so the
+// wording never drifts between the three places it's defined. This is
+// DELIBERATELY a separate field from "anchor": anchor is a short phrase
+// reused word-for-word inside every scene's imagePrompt (so it has to read
+// naturally embedded in an action/setting sentence), while this field is a
+// full standalone prompt for ONE simple "locked" reference photo of the
+// character alone -- modeled on the common creator technique of generating
+// a single clean full-body studio reference first, then using that one
+// approved image (not just text) as the visual anchor for every later
+// scene/poster image and for the image-to-video step.
+const REFERENCE_IMAGE_PROMPT_FIELD_DESC = 'A separate, standalone ENGLISH prompt (not reused elsewhere) for generating ONE "locked" character-reference image of this character ALONE -- no scene, no action, no background story. Written like a professional studio reference-sheet photo brief: a single full-body view from head to bare feet, standing, facing the camera, in a simple relaxed neutral pose, on a plain uncluttered neutral-toned seamless backdrop, even soft beauty-style lighting (softbox-like, minimal harsh shadows), ONE person only, whole figure clearly visible with space above the head and below the feet -- rendered in this movie\'s own established art style (match whatever genre/visual style the rest of the package uses, e.g. photorealistic, 3D animated, anime, watercolor, etc.), incorporating this character\'s own visual details (face, hair, build, outfit) with specific, concrete detail (exact colors, materials, textures) rather than generic adjectives. Keep it simple and free of any scene/action/background detail so it reads as a clean on-model reference sheet the creator can approve once and then reuse. Always end with "--ar 3:4" (a classic vertical full-body portrait framing) regardless of the movie\'s own overall aspect ratio, since a full-body standing reference needs portrait framing to avoid excess empty space on the sides.';
+
+// Shared field-description constants for the other professional-level
+// prompt fields (storyboard image/motion, location background, poster,
+// audio/SFX) -- defined once here and reused by BOTH buildToolDefinition()
+// and buildSegmentToolDefinition() so the two schemas never drift apart.
+// The actual "write like a pro, not generic" instruction lives in
+// SYSTEM_PROMPT's dedicated cinematography section; these descriptions give
+// each field its own quick checklist so the requirement sticks even when
+// Claude is juggling many fields in one big tool call.
+const IMAGE_PROMPT_FIELD_DESC = 'ENGLISH text-to-image prompt optimized for Midjourney/Flux/Google Flow, written at a professional cinematography level, not a generic description: specify shot size (close-up / medium shot / wide establishing shot / over-the-shoulder), camera angle (eye-level / low-angle / high-angle / Dutch tilt), an implied lens feel matching the shot\'s purpose (e.g. 35mm wide vs. 85mm shallow-depth-of-field), a specific lighting setup and mood with implied color temperature (e.g. golden-hour rim light, single hard key light with deep shadows, soft overcast bounce, practical firelight), and a color-grade/film-look reference consistent with the project\'s genre and art style (e.g. desaturated teal-and-orange, warm nostalgic film-stock grade, high-contrast noir). Must reuse the relevant character anchor prompt wording for consistency and end with an --ar aspect ratio tag.';
+const MOTION_PROMPT_FIELD_DESC = 'ENGLISH image-to-video camera motion prompt for Kling/Runway/Google Flow/meta.ai, written as continuing the action FROM this scene\'s own still image (the one from "imagePrompt") used as the starting frame -- e.g. "the camera slowly pushes in as she turns toward the fire," not a description of the still frame itself. Use precise professional camera-movement vocabulary (push in / pull out, dolly, pan, tilt, crane up/down, handheld, whip pan, slow arc, static locked-off) and specify pacing (slow and deliberate vs. fast and kinetic) to match the scene\'s emotional beat.';
+const LOCATION_PROMPT_FIELD_DESC = 'ENGLISH environment-only background prompt (no characters) for generating a background plate, written at a professional cinematography level: include atmosphere (weather, time of day, haze/dust/mist as appropriate), a specific ambient lighting mood with implied color temperature, and clear foreground/midground/background depth layering -- not just a flat description of what the place contains. Ending with an --ar aspect ratio tag.';
+const POSTER_PROMPT_FIELD_DESC = 'ENGLISH text-to-image prompt for generating the poster art, written like a professional one-sheet movie-poster brief: clear hero subject placement and pose, negative space deliberately reserved for a title treatment, a genre-appropriate lighting and color-grade choice, and one strong, unambiguous focal point. Ending with an --ar aspect ratio tag.';
+const AUDIO_PROMPT_FIELD_DESC = 'ENGLISH prompt text written at a professional film-sound level. For background music: mood, tempo/BPM, key instruments, and how the arrangement should build or release in step with the story\'s emotional arc (Suno/Udio style). For SFX: a time-coded list of specific diegetic sounds with their layering noted (foreground foley vs. ambient bed).';
+const ANCHOR_FIELD_DESC = 'Standardized ENGLISH character-anchor prompt string, to append to every image prompt featuring this character for visual consistency. Richly descriptive with specific, concrete visual detail (exact costume materials/colors, distinguishing facial features, build) rather than generic adjectives like "nice" or "cool" -- this is the one piece of text every scene/poster prompt leans on to keep the character looking the same, so vague wording here means visible drift later. Ending with an --ar aspect ratio tag.';
+
 function buildCharacterRevisionTool() {
   return {
     name: 'submit_character_revision',
-    description: "Submit the revised visual description and image-generation anchor prompt for this one character, updated to match the creator's reference image.",
+    description: "Submit the revised visual description, image-generation anchor prompt, and locked reference-photo prompt for this one character, updated to match the creator's reference image.",
     input_schema: {
       type: 'object',
       properties: {
         visual: { type: 'string', description: 'Updated detailed visual description (face, hair, eyes, body, outfit) in Lao, matching the reference image.' },
-        anchor: { type: 'string', description: "Updated standardized ENGLISH character-anchor prompt string, richly descriptive, matching the reference image, ending with the SAME --ar aspect ratio tag as the original anchor prompt provided." },
+        anchor: { type: 'string', description: "Updated standardized ENGLISH character-anchor prompt string, richly descriptive with specific concrete visual detail (not generic adjectives), matching the reference image, ending with the SAME --ar aspect ratio tag as the original anchor prompt provided." },
+        referenceImagePrompt: { type: 'string', description: REFERENCE_IMAGE_PROMPT_FIELD_DESC },
       },
-      required: ['visual', 'anchor'],
+      required: ['visual', 'anchor', 'referenceImagePrompt'],
     },
   };
 }
@@ -376,6 +405,10 @@ app.post('/api/revise-character', express.json({ limit: '6mb' }), async (req, re
     if (imageError) return res.status(imageError.status).json({ error: imageError.error });
 
     const originalArTag = (character.anchor.match(/--ar\s+\S+/) || [])[0] || '';
+    // Older saved characters (generated before this field existed) won't
+    // have one yet -- that's fine, Claude is always asked to produce a
+    // fresh one below regardless of whether an old one is given to work from.
+    const hasExistingRefPrompt = !!(character.referenceImagePrompt && String(character.referenceImagePrompt).trim());
     const tool = buildCharacterRevisionTool();
 
     const baseUserText = `Here is one character from an AI-movie production package:
@@ -384,16 +417,16 @@ app.post('/api/revise-character', express.json({ limit: '6mb' }), async (req, re
 - Role: ${character.role || ''}
 - Current Lao visual description: ${character.visual}
 - Current English anchor prompt: ${character.anchor}
-
-The creator has attached a reference image showing how they actually want this character to look (for example, a test render that came out wrong, or a face/style they want to match). Study the attached image carefully and rewrite BOTH fields so they faithfully match what's shown in the image, while keeping this character's name, age, and story role unchanged. Keep the anchor prompt in the same rich, standardized style as the original (same level of detail, same kind of phrasing for use with Midjourney/Flux/etc.), and end it with the exact same aspect ratio tag the original had${originalArTag ? ` ("${originalArTag}")` : ''}.${notes && String(notes).trim() ? `\n\nThe creator also specifically asked for: "${String(notes).trim()}"` : ''}`;
+${hasExistingRefPrompt ? `- Current locked reference-photo prompt: ${character.referenceImagePrompt}\n` : ''}
+The creator has attached a reference image showing how they actually want this character to look (for example, a test render that came out wrong, or a face/style they want to match). Study the attached image carefully and rewrite the character's fields so they faithfully match what's shown in the image, while keeping this character's name, age, and story role unchanged. Keep the anchor prompt in the same rich, standardized style as the original (same level of detail, same kind of phrasing for use with Midjourney/Flux/etc.), with specific concrete visual detail rather than generic adjectives, and end it with the exact same aspect ratio tag the original had${originalArTag ? ` ("${originalArTag}")` : ''}. Also ${hasExistingRefPrompt ? 'update' : 'write'} the "referenceImagePrompt" field (a separate, standalone locked reference-photo prompt -- see its own description) so it matches the creator's reference image too.${notes && String(notes).trim() ? `\n\nThe creator also specifically asked for: "${String(notes).trim()}"` : ''}`;
 
     let revised;
     try {
       revised = await callVisionRevisionTool({
         tool,
-        requiredFields: ['visual', 'anchor'],
+        requiredFields: ['visual', 'anchor', 'referenceImagePrompt'],
         systemPrompt: 'You are a meticulous visual continuity assistant for an AI film production tool. You analyze a reference image and translate it into precise, reusable text-to-image prompt language.',
-        buildUserText: (missing) => !missing ? baseUserText : `${baseUserText}\n\nIMPORTANT: Your previous attempt was missing: ${missing.join(', ')}. This time you MUST include both "visual" and "anchor" as non-empty strings.`,
+        buildUserText: (missing) => !missing ? baseUserText : `${baseUserText}\n\nIMPORTANT: Your previous attempt was missing: ${missing.join(', ')}. This time you MUST include "visual", "anchor", and "referenceImagePrompt" as non-empty strings.`,
         imageBase64,
         imageMediaType,
         maxTokens: 1500,
@@ -412,8 +445,14 @@ The creator has attached a reference image showing how they actually want this c
     if (originalArTag && !/--ar\s+\S+/.test(revised.anchor)) {
       revised.anchor = `${revised.anchor.trim()} ${originalArTag}`;
     }
+    // Same safety net for the reference-photo prompt, but towards ITS OWN
+    // fixed "--ar 3:4" convention (see REFERENCE_IMAGE_PROMPT_FIELD_DESC)
+    // rather than the character's scene aspect ratio.
+    if (!/--ar\s+\S+/.test(revised.referenceImagePrompt || '')) {
+      revised.referenceImagePrompt = `${(revised.referenceImagePrompt || '').trim()} --ar 3:4`.trim();
+    }
 
-    res.json({ visual: revised.visual, anchor: revised.anchor, _usage: getUsageSummary() });
+    res.json({ visual: revised.visual, anchor: revised.anchor, referenceImagePrompt: revised.referenceImagePrompt, _usage: getUsageSummary() });
   } catch (err) {
     console.error('[revise-character] error:', err);
     res.status(err && err.status ? err.status : 500).json({ error: describeAnthropicError(err) });
@@ -477,15 +516,17 @@ app.post('/api/revise-prompt', express.json({ limit: '6mb' }), async (req, res) 
     const originalArTag = preserveArTag ? (currentText.match(/--ar\s+\S+/) || [])[0] || '' : '';
     const tool = buildPromptRevisionTool();
 
+    const PROFESSIONAL_LEVEL_NOTE = 'Write (or rewrite) it at a professional cinematography/film-production level, not a generic description: where relevant, include shot size, camera angle, lens feel, a specific named lighting setup and mood, composition, and a color-grade/film-look reference (for image prompts); precise camera-movement vocabulary and pacing (for motion prompts); or real musical/sound-design vocabulary (for audio prompts). Raise the prompt to this bar even if the original prompt you were given was written more generically.';
+
     const baseUserText = hasImage
       ? `Here is an existing prompt from an AI-movie production package:
 ${context ? `Context: ${context}\n` : ''}Current prompt: "${currentText}"
 
-The creator has attached a reference image showing what they actually want (for example, a test render that came out wrong, or a mood/style/location photo they want to match). Study the attached image carefully and rewrite the prompt so it faithfully matches what's shown in the image, while keeping the same purpose and the same rich, standardized level of detail as the original.${originalArTag ? ` End it with the exact same aspect ratio tag the original had ("${originalArTag}").` : ''}${hasNotes ? `\n\nThe creator also specifically asked for: "${String(notes).trim()}"` : ''}`
+The creator has attached a reference image showing what they actually want (for example, a test render that came out wrong, or a mood/style/location photo they want to match). Study the attached image carefully and rewrite the prompt so it faithfully matches what's shown in the image, while keeping the same purpose and the same rich, standardized level of detail as the original. ${PROFESSIONAL_LEVEL_NOTE}${originalArTag ? ` End it with the exact same aspect ratio tag the original had ("${originalArTag}").` : ''}${hasNotes ? `\n\nThe creator also specifically asked for: "${String(notes).trim()}"` : ''}`
       : `Here is an existing prompt from an AI-movie production package:
 ${context ? `Context: ${context}\n` : ''}Current prompt: "${currentText}"
 
-There is no reference image this time — instead, the creator wrote down exactly what they want changed. Read their description carefully and rewrite the prompt to match it, while keeping the same purpose and the same rich, standardized level of detail as the original.${originalArTag ? ` End it with the exact same aspect ratio tag the original had ("${originalArTag}").` : ''}
+There is no reference image this time — instead, the creator wrote down exactly what they want changed. Read their description carefully and rewrite the prompt to match it, while keeping the same purpose and the same rich, standardized level of detail as the original. ${PROFESSIONAL_LEVEL_NOTE}${originalArTag ? ` End it with the exact same aspect ratio tag the original had ("${originalArTag}").` : ''}
 
 The creator's description of what they want: "${String(notes).trim()}"`;
 
@@ -764,9 +805,10 @@ function buildToolDefinition(sceneCount) {
               age: { type: 'string', description: 'Age, in Lao (e.g. "10 ປີ").' },
               role: { type: 'string', description: 'Role in the story, in Lao.' },
               visual: { type: 'string', description: 'Detailed visual description (face, hair, eyes, body, outfit) in Lao.' },
-              anchor: { type: 'string', description: 'Standardized ENGLISH character-anchor prompt string, richly descriptive, to append to every image prompt featuring this character for visual consistency, ending with an --ar aspect ratio tag.' },
+              anchor: { type: 'string', description: ANCHOR_FIELD_DESC },
+              referenceImagePrompt: { type: 'string', description: REFERENCE_IMAGE_PROMPT_FIELD_DESC },
             },
-            required: ['name', 'age', 'role', 'visual', 'anchor'],
+            required: ['name', 'age', 'role', 'visual', 'anchor', 'referenceImagePrompt'],
           },
         },
         storyboard: {
@@ -780,8 +822,8 @@ function buildToolDefinition(sceneCount) {
               scene: { type: 'integer', description: 'Scene number starting at 1.' },
               time: { type: 'string', description: 'Timecode range like "00:00 - 00:10".' },
               desc: { type: 'string', description: 'Short scene description in Lao.' },
-              imagePrompt: { type: 'string', description: 'ENGLISH text-to-image prompt optimized for Midjourney/Flux/Google Flow: subject, camera angle, lighting, style. Must reuse the relevant character anchor prompt wording for consistency and end with an --ar aspect ratio tag.' },
-              motionPrompt: { type: 'string', description: 'ENGLISH image-to-video camera motion prompt for Kling/Runway (e.g. panning right, slow zoom in, dynamic camera angle).' },
+              imagePrompt: { type: 'string', description: IMAGE_PROMPT_FIELD_DESC },
+              motionPrompt: { type: 'string', description: MOTION_PROMPT_FIELD_DESC },
             },
             required: ['scene', 'time', 'desc', 'imagePrompt', 'motionPrompt'],
           },
@@ -796,7 +838,7 @@ function buildToolDefinition(sceneCount) {
             properties: {
               name: { type: 'string', description: 'Location name in Lao with English translation in parentheses.' },
               desc: { type: 'string', description: 'Short description in Lao.' },
-              prompt: { type: 'string', description: 'ENGLISH environment-only background prompt (no characters) for generating a background plate, ending with an --ar aspect ratio tag.' },
+              prompt: { type: 'string', description: LOCATION_PROMPT_FIELD_DESC },
             },
             required: ['name', 'desc', 'prompt'],
           },
@@ -810,7 +852,7 @@ function buildToolDefinition(sceneCount) {
             type: 'object',
             properties: {
               title: { type: 'string', description: 'Concept label, e.g. "Poster Concept 1: Vertical TikTok/Shorts (9:16)".' },
-              prompt: { type: 'string', description: 'ENGLISH text-to-image prompt for generating the poster art, ending with an --ar aspect ratio tag.' },
+              prompt: { type: 'string', description: POSTER_PROMPT_FIELD_DESC },
               textOverlay: { type: 'string', description: 'Text overlay recommendation (title placement + catchphrase), Lao title with English where relevant.' },
             },
             required: ['title', 'prompt', 'textOverlay'],
@@ -841,7 +883,7 @@ function buildToolDefinition(sceneCount) {
             type: 'object',
             properties: {
               type: { type: 'string', description: 'e.g. "Background Music (Suno / Udio Prompt)" or "Sound Effects (SFX List)".' },
-              prompt: { type: 'string', description: 'ENGLISH prompt text (mood/tempo/instruments for music, or time-coded ambient sounds for SFX).' },
+              prompt: { type: 'string', description: AUDIO_PROMPT_FIELD_DESC },
             },
             required: ['type', 'prompt'],
           },
@@ -861,11 +903,15 @@ You always respond by calling the \`submit_movie_package\` tool exactly once wit
 
 Language rules (follow exactly):
 - Write all narrative/creative, human-facing Lao content in natural, modern, fluent Lao script: logline, theme, act summaries, character name/age/role/visual description, voiceover text, scene descriptions, poster text overlays, social titles/description/keywords.
-- Write all fields destined for English-only AI image/video/music generation tools entirely in English, richly descriptive, comma-separated keyword style typical of Midjourney/Flux/Google Flow prompts: character anchor prompts, image prompts, motion prompts, location background prompts, poster image prompts, and audio/SFX prompts. Always end every image-generation prompt (character anchor is an exception if you prefer, but scene/location/poster image prompts especially) with the exact aspect ratio tag provided in the user message (e.g. "--ar 9:16").
+- Write all fields destined for English-only AI image/video/music generation tools entirely in English, richly descriptive, comma-separated keyword style typical of Midjourney/Flux/Google Flow prompts: character anchor prompts, reference-image prompts, image prompts, motion prompts, location background prompts, poster image prompts, and audio/SFX prompts. Always end every image-generation prompt (character anchor is an exception if you prefer, but scene/location/poster image prompts especially) with the exact aspect ratio tag provided in the user message (e.g. "--ar 9:16") — EXCEPT each character's "referenceImagePrompt", which always ends with its own fixed "--ar 3:4" regardless of the movie's aspect ratio (see that field's description).
 - Keep every character's name spelling and visual identity identical everywhere it appears, and make sure each scene's imagePrompt actually incorporates the relevant character's anchor description so images stay visually consistent across the whole short film — this consistency is the entire point of the anchor prompt.
+- Every character needs BOTH an "anchor" (a short phrase meant to be embedded word-for-word inside other prompts) AND a separate "referenceImagePrompt" (a full standalone prompt for one locked, plain reference photo of just that character — see its own field description). Don't confuse the two or merge them into one field.
 - Every voiceover segment needs a "speaker" so the creator can tell at a glance whether a line is narration or one character talking: use the exact literal string "ຜູ້ບັນຍາຍ (Narrator)" for narration lines, or that character's exact "name" field value (character-for-character identical, not a nickname or shortened form) when the line is that character's own spoken dialogue. Don't default every line to the narrator — if the scene description implies a character is speaking (a line of dialogue, a shout, a question to another character), write it as that character's line instead of folding it into narration.
 - Timecodes must be contiguous and non-overlapping across the full runtime, formatted as "MM:SS - MM:SS".
-- Tailor the hashtags and keywords to the specific platforms the user selected.`;
+- Tailor the hashtags and keywords to the specific platforms the user selected.
+
+Professional cinematography standard (applies to every imagePrompt, motionPrompt, location prompt, poster prompt, and audio/SFX prompt — read each field's own description below for its specific checklist, this is the overall bar all of them must clear):
+Write every one of these prompts the way a working cinematographer, director, or sound designer would actually brief a shot or cue — never a flat, generic description like "a boy standing in a village, nice lighting." A professional-level prompt always specifies concrete technical and creative choices: shot size and camera angle, an implied lens feel suited to the moment, a named lighting setup with its mood and implied color temperature, a deliberate composition, and (for images) a color-grade or film-look reference that matches the project's genre and art style — consistently, not just on a few "important" scenes. For motion prompts, that same rigor means precise camera-movement vocabulary and clear pacing, phrased as continuing from the scene's own still frame. For audio, it means real musical/sound-design vocabulary (tempo, instrumentation, diegetic vs. ambient layering) instead of one-line mood words. This level of specificity is what separates a prompt an amateur would type from one a professional production would actually use — hold every single prompt field in the package to it, regardless of the project's genre, duration, or whether it's a single generation or one part of a segmented movie.`;
 
 function buildUserPrompt({ concept, genre, format, audience, duration, platforms }) {
   const sceneCount = getSceneCount(duration);
@@ -884,12 +930,12 @@ function buildUserPrompt({ concept, genre, format, audience, duration, platforms
 
 Requirements:
 1. Produce exactly ${sceneCount} storyboard scenes and exactly ${sceneCount} voiceover segments, both covering 00:00 to ${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, '0')} in contiguous 10-second increments, in the same order. Label each voiceover segment's "speaker" as either the narrator or the specific character speaking that line (see the system prompt's speaker rule) — mix narration and character dialogue naturally across the ${sceneCount} segments rather than making everything narration.
-2. Every scene's image prompt must read as a standalone, richly detailed Midjourney/Flux/Google Flow prompt (subject, action, camera angle, lighting, art style) and must incorporate the relevant character anchor description(s) so the character looks the same across every scene.
-3. Every scene's motion prompt must describe camera movement only, suitable for an image-to-video tool (Kling/Runway/Google Flow), one or two sentences.
-4. Give 2-4 locations with English, character-free environment prompts.
-5. Give exactly 3 distinct poster/thumbnail concepts with prompts and text overlay recommendations, covering the requested aspect ratio.
+2. Every scene's image prompt must read as a standalone, professional-cinematography-level Midjourney/Flux/Google Flow prompt per the system prompt's standard (shot size, camera angle, lens feel, named lighting setup, color grade — not just "subject, camera angle, lighting, style" as a checklist to skim through) and must incorporate the relevant character anchor description(s) so the character looks the same across every scene. Each character also needs its own separate "referenceImagePrompt" for a single locked reference photo of that character alone (see that field's description) — this is a different, simpler prompt from the anchor, not a duplicate of it.
+3. Every scene's motion prompt must describe camera movement only, at the same professional level (precise movement vocabulary + pacing, per the system prompt's standard), suitable for an image-to-video tool (Kling/Runway/Google Flow/meta.ai) that is given that scene's own generated still image as the starting frame — phrase it as the camera/action continuing FROM that still frame (e.g. "the camera slowly pushes in as she turns toward...") rather than describing the frame itself, one or two sentences.
+4. Give 2-4 locations with English, character-free environment prompts at the same professional cinematography level (atmosphere, lighting mood, depth layering).
+5. Give exactly 3 distinct poster/thumbnail concepts, each with a professional one-sheet-level prompt (hero placement, reserved title space, genre-appropriate grade) and text overlay recommendations, covering the requested aspect ratio.
 6. Give a social package (3 titles, a Lao description with timestamps, hashtags, SEO keywords) tailored to: ${platformList}.
-7. Give at least one background-music prompt (Suno/Udio style: mood, tempo, instruments) and one time-coded SFX list.
+7. Give at least one background-music prompt at a professional film-score level (Suno/Udio style: mood, tempo/BPM, instruments, how it builds/releases with the story) and one time-coded SFX list with specific, layered diegetic sounds.
 
 Call the submit_movie_package tool now with the complete package.`;
 }
@@ -899,7 +945,7 @@ Call the submit_movie_package tool now with the complete package.`;
 // rules stay identical between the two endpoints.
 const SEGMENTED_SYSTEM_ADDENDUM = `
 
-You are generating ONE PART of a longer movie that is split into 3 parts of ${SEGMENT_SCENES_PER_PART} scenes each (Beginning, Middle, End — ${SEGMENT_SCENES_PER_PART * 3} scenes / ${(SEGMENT_SCENES_PER_PART * 3 * 10) / 60} minutes total). The creator may generate these parts in any order, one at a time. When no existing story bible is given in the user message, invent one that spans the FULL movie — title, logline, theme, art style, and all three act summaries (act1 = Beginning, act2 = Middle, act3 = End) — even though you are only writing detailed scene-by-scene content for one part right now; the other two parts will be generated later purely from your act summaries, so make sure each act summary alone is enough to write that part from. When an existing story bible IS given, you MUST reuse it exactly as given — same title, theme, art style, and, critically, the exact same character names and anchor prompts word-for-word wherever they appear — and write only this part's ${SEGMENT_SCENES_PER_PART} scenes, consistent with the given act summary for this part.`;
+You are generating ONE PART of a longer movie that is split into 3 parts of ${SEGMENT_SCENES_PER_PART} scenes each (Beginning, Middle, End — ${SEGMENT_SCENES_PER_PART * 3} scenes / ${(SEGMENT_SCENES_PER_PART * 3 * 10) / 60} minutes total). The creator may generate these parts in any order, one at a time. When no existing story bible is given in the user message, invent one that spans the FULL movie — title, logline, theme, art style, and all three act summaries (act1 = Beginning, act2 = Middle, act3 = End) — even though you are only writing detailed scene-by-scene content for one part right now; the other two parts will be generated later purely from your act summaries, so make sure each act summary alone is enough to write that part from. When an existing story bible IS given, you MUST reuse it exactly as given — same title, theme, art style, and, critically, the exact same character names, anchor prompts, AND referenceImagePrompt text word-for-word wherever they appear — and write only this part's ${SEGMENT_SCENES_PER_PART} scenes, consistent with the given act summary for this part.`;
 
 function buildSegmentToolDefinition({ includeStoryBible }) {
   const sharedProps = {
@@ -907,7 +953,7 @@ function buildSegmentToolDefinition({ includeStoryBible }) {
       type: 'array',
       description: includeStoryBible
         ? '2 to 4 main characters for the whole movie.'
-        : "The existing characters, reused with the exact same name and anchor text; add a new one only if this part genuinely introduces one the creator hasn't met yet.",
+        : "The existing characters, reused with the exact same name, anchor text, AND referenceImagePrompt text; add a new one only if this part genuinely introduces one the creator hasn't met yet.",
       minItems: 2,
       maxItems: 6,
       items: {
@@ -917,9 +963,10 @@ function buildSegmentToolDefinition({ includeStoryBible }) {
           age: { type: 'string', description: 'Age, in Lao (e.g. "10 ປີ").' },
           role: { type: 'string', description: 'Role in the story, in Lao.' },
           visual: { type: 'string', description: 'Detailed visual description (face, hair, eyes, body, outfit) in Lao.' },
-          anchor: { type: 'string', description: 'Standardized ENGLISH character-anchor prompt string, richly descriptive, ending with an --ar aspect ratio tag.' },
+          anchor: { type: 'string', description: ANCHOR_FIELD_DESC },
+          referenceImagePrompt: { type: 'string', description: REFERENCE_IMAGE_PROMPT_FIELD_DESC },
         },
-        required: ['name', 'age', 'role', 'visual', 'anchor'],
+        required: ['name', 'age', 'role', 'visual', 'anchor', 'referenceImagePrompt'],
       },
     },
     locations: {
@@ -934,7 +981,7 @@ function buildSegmentToolDefinition({ includeStoryBible }) {
         properties: {
           name: { type: 'string', description: 'Location name in Lao with English translation in parentheses.' },
           desc: { type: 'string', description: 'Short description in Lao.' },
-          prompt: { type: 'string', description: 'ENGLISH environment-only background prompt (no characters), ending with an --ar aspect ratio tag.' },
+          prompt: { type: 'string', description: LOCATION_PROMPT_FIELD_DESC },
         },
         required: ['name', 'desc', 'prompt'],
       },
@@ -950,8 +997,8 @@ function buildSegmentToolDefinition({ includeStoryBible }) {
           scene: { type: 'integer', description: 'Scene number within this part, starting at 1.' },
           time: { type: 'string', description: 'Timecode range within this part, like "00:00 - 00:10".' },
           desc: { type: 'string', description: 'Short scene description in Lao.' },
-          imagePrompt: { type: 'string', description: 'ENGLISH text-to-image prompt optimized for Midjourney/Flux/Google Flow, incorporating the relevant character anchor(s) word-for-word, ending with an --ar aspect ratio tag.' },
-          motionPrompt: { type: 'string', description: 'ENGLISH image-to-video camera motion prompt for Kling/Runway/Google Flow (camera movement only).' },
+          imagePrompt: { type: 'string', description: IMAGE_PROMPT_FIELD_DESC },
+          motionPrompt: { type: 'string', description: MOTION_PROMPT_FIELD_DESC },
         },
         required: ['scene', 'time', 'desc', 'imagePrompt', 'motionPrompt'],
       },
@@ -1008,7 +1055,7 @@ function buildSegmentToolDefinition({ includeStoryBible }) {
             type: 'object',
             properties: {
               title: { type: 'string', description: 'Concept label, e.g. "Poster Concept 1: Vertical TikTok/Shorts (9:16)".' },
-              prompt: { type: 'string', description: 'ENGLISH text-to-image prompt for generating the poster art, ending with an --ar aspect ratio tag.' },
+              prompt: { type: 'string', description: POSTER_PROMPT_FIELD_DESC },
               textOverlay: { type: 'string', description: 'Text overlay recommendation, Lao title with English where relevant.' },
             },
             required: ['title', 'prompt', 'textOverlay'],
@@ -1033,7 +1080,7 @@ function buildSegmentToolDefinition({ includeStoryBible }) {
             type: 'object',
             properties: {
               type: { type: 'string', description: 'e.g. "Background Music (Suno / Udio Prompt)" or "Sound Effects (SFX List)".' },
-              prompt: { type: 'string', description: 'ENGLISH prompt text.' },
+              prompt: { type: 'string', description: AUDIO_PROMPT_FIELD_DESC },
             },
             required: ['type', 'prompt'],
           },
@@ -1074,17 +1121,17 @@ An established story bible already exists for this movie — you MUST reuse it e
 - Act 1 (Beginning) summary: ${storyBible.act1}
 - Act 2 (Middle) summary: ${storyBible.act2}
 - Act 3 (End) summary: ${storyBible.act3}
-- Existing characters (reuse these names and anchor prompts EXACTLY, word-for-word, in every scene that features them): ${JSON.stringify(storyBible.characters || [])}
+- Existing characters (reuse these names, anchor prompts, AND referenceImagePrompt text EXACTLY, word-for-word, in every scene that features them): ${JSON.stringify(storyBible.characters || [])}
 - Existing locations (reuse if this part is set there): ${JSON.stringify(storyBible.locations || [])}
 
-Write this part's ${SEGMENT_SCENES_PER_PART} scenes so they dramatize the "${cfg.labelEn}" act summary above (Act ${cfg.index + 1}) in detail. Only introduce a new character or location if the story genuinely needs one that isn't in the lists above; otherwise return the existing characters/locations arrays unchanged (same names, same anchor text).
+Write this part's ${SEGMENT_SCENES_PER_PART} scenes so they dramatize the "${cfg.labelEn}" act summary above (Act ${cfg.index + 1}) in detail. Only introduce a new character or location if the story genuinely needs one that isn't in the lists above; otherwise return the existing characters/locations arrays completely unchanged (same names, same anchor text, same referenceImagePrompt text).
 `;
   } else {
     prompt += `
 No story bible exists yet for this movie — invent the complete one now, covering the FULL planned movie even though you're only writing detailed scenes for the ${cfg.labelEn} part right now:
 1. A title, logline, theme, and art style for the whole movie.
 2. All three act summaries (act1 = Beginning, act2 = Middle, act3 = End), 1-3 Lao sentences each, forming one coherent overall story arc from start to finish. Only the "${cfg.labelEn}" act needs to be dramatized into full scenes right now — the other two acts' summaries are a roadmap the creator will use to generate those parts later, so make each one clear enough to write from on its own.
-3. 2-4 main characters with names, ages, roles, visual descriptions, and English anchor prompts.
+3. 2-4 main characters with names, ages, roles, visual descriptions, English anchor prompts, and a referenceImagePrompt for each.
 4. 2-4 locations.
 5. Exactly 3 poster concepts, a full social media package, and audio prompts (background music + SFX) for the whole movie — these will not be regenerated when the other parts are written later.
 `;
