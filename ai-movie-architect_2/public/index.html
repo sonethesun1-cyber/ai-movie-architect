@@ -303,7 +303,7 @@
                         </div>
                     </div>
 
-                    <button onclick="handleGenerateClick()" id="btnGenerate" class="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold text-xs shadow-lg shadow-indigo-600/30 transition transform active:scale-95 flex items-center justify-center gap-2">
+                    <button onclick="handleGenerateClick()" id="btnGenerate" class="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-indigo-500 via-indigo-600 to-indigo-800 hover:from-indigo-400 hover:to-indigo-700 text-white font-semibold text-xs shadow-lg shadow-indigo-600/30 transition transform active:scale-95 flex items-center justify-center gap-2">
                         <i class="ph-bold ph-magic-wand text-lg" id="btnGenerateIcon"></i>
                         <span id="btnGenerateLabel">ປະມວນຜົນສ້າງ Package ໜັງ AI (Generate with Claude)</span>
                     </button>
@@ -610,7 +610,7 @@
     <div id="apiKeyModal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4" style="background: rgba(2,4,10,0.75); backdrop-filter: blur(4px);">
         <div class="glass-panel w-full max-w-md rounded-2xl border border-slate-700 p-6 space-y-4 shadow-2xl">
             <div class="flex items-center gap-2.5">
-                <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center flex-shrink-0">
+                <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-indigo-800 flex items-center justify-center flex-shrink-0">
                     <i class="ph-bold ph-key text-lg text-white"></i>
                 </div>
                 <div>
@@ -647,7 +647,7 @@
                 <button onclick="closeApiKeyModal()" class="text-xs px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
                     ຂ້າມໄປກ່ອນ (Skip)
                 </button>
-                <button onclick="saveApiKey()" id="apiKeyModalSaveBtn" class="text-xs px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold transition flex items-center gap-1.5">
+                <button onclick="saveApiKey()" id="apiKeyModalSaveBtn" class="text-xs px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-indigo-800 hover:from-indigo-400 hover:to-indigo-700 text-white font-semibold transition flex items-center gap-1.5">
                     <i class="ph-bold ph-floppy-disk"></i>
                     <span>ບັນທຶກ (Save)</span>
                 </button>
@@ -746,14 +746,16 @@
                     age: "10 ປີ",
                     role: "ຕົວເອກ (Main Character)",
                     visual: "ເດັກຊາຍລາວ ຕາໂຕສົດໃສ, ຜົມດຳສັ້ນ, ໃສ່ເສື້ອແຂນສັ້ນສີຟ້າ, ໂສ້ງຂາສັ້ນ, ມີກະເປົ໋າຍືມສະພາຍຂ້າງ",
-                    anchor: "10-year-old Lao boy, cheerful big dark eyes, short messy black hair, wearing a casual blue indigo t-shirt, brown woven traditional Lao cross-body bag, 3D Pixar render style, highly detailed character design --ar 9:16"
+                    anchor: "10-year-old Lao boy, cheerful big dark eyes, short messy black hair, wearing a casual blue indigo t-shirt, brown woven traditional Lao cross-body bag, 3D Pixar render style, highly detailed character design --ar 9:16",
+                    referenceImagePrompt: "A single full-body character reference render, head to bare feet, standing facing the camera in a simple relaxed neutral pose, on a plain neutral-toned studio backdrop with even soft lighting, whole figure clearly visible with space above the head and below the feet, ONE person only, no background scene or props: a 10-year-old Lao boy, cheerful big dark eyes, short messy black hair, wearing a casual blue indigo t-shirt, brown woven traditional Lao cross-body bag, 3D Pixar render style, highly detailed character design --ar 3:4"
                 },
                 {
                     name: "ອໍໂຕ້ (Otto the Ancient Bot)",
                     age: "500 ປີ",
                     role: "ຄູ່ຫູຫຸ່ນພົນ (Robot Companion)",
                     visual: "ຫຸ່ນພົນອໍໂຕ້ນ້ອຍສີທອງປະສົມສີຂຽວ Moss, ມີດວງຕາສີຟ້າ Glowing LED, ເຮັດຈາກໂລຫະບູຮານມີລວດລາຍລາວ",
-                    anchor: "Cute small ancient solar robot, brass and mossy bronze metallic texture, glowing neon blue round eyes, intricate traditional Lao patterns engraved on chest plate, friendly appearance, 3D Pixar render style --ar 9:16"
+                    anchor: "Cute small ancient solar robot, brass and mossy bronze metallic texture, glowing neon blue round eyes, intricate traditional Lao patterns engraved on chest plate, friendly appearance, 3D Pixar render style --ar 9:16",
+                    referenceImagePrompt: "A single full-body character reference render, head to base, standing facing the camera in a simple relaxed neutral pose, on a plain neutral-toned studio backdrop with even soft lighting, whole figure clearly visible with space above the head and below the base, ONE subject only, no background scene or props: a cute small ancient solar robot, brass and mossy bronze metallic texture, glowing neon blue round eyes, intricate traditional Lao patterns engraved on chest plate, friendly appearance, 3D Pixar render style --ar 3:4"
                 }
             ],
             storyboard: [
@@ -1451,6 +1453,15 @@ async function checkApiStatus(openModalIfMissing) {
                         </div>
                         <p class="text-[11px] text-slate-400 font-mono bg-slate-950/80 p-2 rounded-lg border border-slate-800 leading-normal select-all" id="charAnchorText-${i}">${escapeHtml(c.anchor)}</p>
                     </div>
+                    ${c.referenceImagePrompt ? `
+                    <div class="pt-2 border-t border-slate-800/80">
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="text-[10px] font-bold uppercase tracking-wider text-sky-400">ຮູບອ້າງອີງແບບລັອກ (Locked Reference Photo Prompt):</span>
+                            <button onclick="copyCharacterReferencePrompt(${i})" class="text-[11px] text-indigo-400 hover:underline">Copy</button>
+                        </div>
+                        <p class="text-[11px] text-slate-400 font-mono bg-slate-950/80 p-2 rounded-lg border border-slate-800 leading-normal select-all" id="charRefPromptText-${i}">${escapeHtml(c.referenceImagePrompt)}</p>
+                        <p class="text-[10px] text-slate-500 mt-1 leading-relaxed">prompt ຮູບອ້າງອີງນີ້ແຍກຕ່າງຫາກຈາກ Anchor Prompt ຂ້າງເທິງ — ມັນຖືກອອກແບບໃຫ້ເປັນຮູບຄົນດຽວ ເຕັມໂຕ ພື້ນຫຼັງທຳມະດາ (ບໍ່ມີສາກ/ສະຖານທີ່) ເພື່ອໃຊ້ເປັນຮູບ "ລັອກ" ໜ້າຕາຕົວລະຄອນໄວ້ອ້າງອີງ.</p>
+                    </div>` : ''}
                     ${generatedImageBoxHtml('char-' + i)}
                     ${imgRevisionWidgetHtml('char-' + i, `reviseCharacterFromImage(${i})`)}
                 </div>
@@ -1494,6 +1505,10 @@ async function checkApiStatus(openModalIfMissing) {
                                 <button onclick="navigator.clipboard.writeText('${sb.motionPrompt.replace(/'/g, "\\'")}')" class="text-[10px] text-indigo-400 hover:underline">Copy</button>
                             </div>
                             <p class="text-[11px] text-slate-300 font-mono select-all leading-relaxed">${sb.motionPrompt}</p>
+                            <div class="mt-1 bg-slate-900/80 p-2 rounded-lg border border-dashed border-sky-800/60 text-[10px] text-sky-200/90 leading-relaxed flex items-start gap-1.5">
+                                <i class="ph-bold ph-lightbulb mt-0.5 flex-shrink-0 text-sky-400"></i>
+                                <span>ວິທີສ້າງວິດີໂອສາກນີ້: ກົດ "ສ້າງຮູບ" ທາງຊ້າຍ (ຫຼືດາວໂຫຼດຮູບທີ່ສ້າງແລ້ວ) → ເປີດ Google Flow ຫຼື meta.ai → ອັບໂຫລດຮູບນັ້ນເປັນເຟຣມທຳອິດ (starting image) → ວາງ Motion Prompt ນີ້ໃສ່ → ສັ່ງສ້າງວິດີໂອ. ການເລີ່ມຈາກຮູບທີ່ອະນຸມັດແລ້ວແບບນີ້ ເຮັດໃຫ້ຕົວລະຄອນ/ສາກໜ້າຕາຄົງທີ່ກວ່າການພິມແຕ່ Motion Prompt ຢ່າງດຽວ.</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2114,7 +2129,12 @@ async function checkApiStatus(openModalIfMissing) {
             if (id.startsWith('char-')) {
                 const i = parseInt(id.slice('char-'.length), 10);
                 const c = currentProject.characters[i];
-                promptText = c ? c.anchor : null;
+                // Prefer the dedicated "locked reference photo" prompt (a
+                // clean, single-person studio-style shot written specifically
+                // for this button) -- fall back to the anchor prompt for
+                // characters from an older saved project/History entry that
+                // predates this field, so "ສ້າງຮູບ" still works for them too.
+                promptText = c ? (c.referenceImagePrompt || c.anchor) : null;
             } else {
                 const spec = promptRevisionSpecs[id];
                 promptText = spec ? spec.getText() : null;
@@ -2144,18 +2164,41 @@ async function checkApiStatus(openModalIfMissing) {
         // the actual picture + regenerate/download controls. Used both by
         // generateCardImage() right after a successful generation and by
         // hydrateGeneratedImages() when restoring a previously-cached image.
+        // A friendlier download filename per card type than the raw internal
+        // id ("char-0", "scene-3", ...) -- mainly so a creator who downloads
+        // several of these to feed into Google Flow/meta.ai (see the
+        // storyboard tab's tip box) ends up with files they can tell apart
+        // in their downloads folder instead of a pile of "scene-3.jpg"s.
+        function generatedImageDownloadName(id) {
+            const m = /^(char|scene|loc|poster)-(\d+)$/.exec(id);
+            if (!m) return `${id}.jpg`;
+            const n = parseInt(m[2], 10) + 1;
+            const kind = { char: 'character-reference', scene: 'scene-still', loc: 'location', poster: 'poster' }[m[1]];
+            return `${kind}-${n}.jpg`;
+        }
+
         function renderGeneratedImageInto(id, base64, mediaType) {
             const box = document.getElementById(`genImgContent-${id}`);
             if (!box) return; // this card isn't on screen anymore (tab re-rendered since) -- nothing to patch
             const dataUrl = `data:${mediaType || 'image/jpeg'};base64,${base64}`;
+            // The character card's image is a "locked" reference shot meant
+            // to be approved once and then reused everywhere -- a small
+            // badge makes that intent visible (echoing how creators doing
+            // this manually mark their own approved reference as "locked").
+            const lockedBadge = id.startsWith('char-')
+                ? `<span class="absolute top-1.5 left-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-950/80 border border-indigo-500/50 text-indigo-300 flex items-center gap-1"><i class="ph-bold ph-lock-simple"></i> ລັອກ</span>`
+                : '';
             box.innerHTML = `
                 <div class="space-y-2 w-full">
-                    <img src="${dataUrl}" class="w-full max-w-[220px] rounded-lg border border-slate-700 object-cover" />
+                    <div class="relative inline-block">
+                        <img src="${dataUrl}" class="w-full max-w-[220px] rounded-lg border border-slate-700 object-cover" />
+                        ${lockedBadge}
+                    </div>
                     <div class="flex items-center gap-2 flex-wrap">
                         <button onclick="generateCardImage('${id}')" id="genImgBtn-${id}" class="text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition flex items-center gap-1.5">
                             <i class="ph-bold ph-arrow-clockwise"></i> ສ້າງຮູບໃໝ່
                         </button>
-                        <a href="${dataUrl}" download="${id}.jpg" class="text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition flex items-center gap-1.5">
+                        <a href="${dataUrl}" download="${generatedImageDownloadName(id)}" class="text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition flex items-center gap-1.5">
                             <i class="ph-bold ph-download-simple"></i> ດາວໂຫຼດ
                         </a>
                     </div>
@@ -2291,6 +2334,13 @@ async function checkApiStatus(openModalIfMissing) {
             showToast('ຄັດລອກ Anchor Prompt ແລ້ວ');
         }
 
+        function copyCharacterReferencePrompt(i) {
+            const c = currentProject.characters[i];
+            if (!c || !c.referenceImagePrompt) return;
+            navigator.clipboard.writeText(c.referenceImagePrompt);
+            showToast('ຄັດລອກ Reference Photo Prompt ແລ້ວ');
+        }
+
         // Text-only counterpart to imgRevisionWidgetHtml(), used only by the
         // Audio tab. Claude's API can analyze a photo but has no way to
         // listen to an uploaded sound file or voice recording, so instead of
@@ -2386,7 +2436,7 @@ async function checkApiStatus(openModalIfMissing) {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            character: { name: character.name, age: character.age, role: character.role, visual: character.visual, anchor: character.anchor },
+                            character: { name: character.name, age: character.age, role: character.role, visual: character.visual, anchor: character.anchor, referenceImagePrompt: character.referenceImagePrompt },
                             imageBase64: draft.base64,
                             imageMediaType: draft.mediaType,
                             notes,
@@ -2404,6 +2454,15 @@ async function checkApiStatus(openModalIfMissing) {
 
                 character.visual = data.visual;
                 character.anchor = data.anchor;
+                character.referenceImagePrompt = data.referenceImagePrompt;
+
+                // The character's look just changed, so any previously
+                // generated "ສ້າງຮູບ" portrait for this card would now be
+                // stale (it was rendered from the OLD referenceImagePrompt/
+                // anchor) -- clear it from IndexedDB so the card goes back to
+                // showing the "ສ້າງຮູບ" button instead of a picture that no
+                // longer matches the revised description.
+                if (currentProject._imageNs) deleteGeneratedImage(currentProject._imageNs, id);
 
                 // The storyboard's imagePrompt (and sometimes poster prompts)
                 // are generated with the OLD anchor text copied in verbatim
@@ -2633,7 +2692,7 @@ async function checkApiStatus(openModalIfMissing) {
             });
             md += `\n## 3. Characters\n`;
             currentProject.characters.forEach(c => {
-                md += `### ${c.name} (${c.role}, ${c.age})\n- Visual: ${c.visual}\n- Anchor Prompt: \`${c.anchor}\`\n\n`;
+                md += `### ${c.name} (${c.role}, ${c.age})\n- Visual: ${c.visual}\n- Anchor Prompt: \`${c.anchor}\`\n${c.referenceImagePrompt ? `- Locked Reference Photo Prompt: \`${c.referenceImagePrompt}\`\n` : ''}\n`;
             });
             md += `## 4. Storyboard Prompts\n`;
             currentProject.storyboard.forEach(s => {
